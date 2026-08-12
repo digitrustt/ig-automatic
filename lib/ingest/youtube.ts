@@ -9,6 +9,17 @@ const MIN_VIDEO_SECONDS = 180;
 /** How far back to pick up videos on the first poll of a channel. */
 const MAX_VIDEO_AGE_DAYS = 14;
 
+/**
+ * Videos to start clipping per poll.
+ *
+ * One video yields several clips — days of posting — so there is no reason to
+ * work through a backlog at once, and every reason not to: transcription and
+ * segment selection are metered per minute, and firing a channel's whole
+ * recent history in one batch exhausts the allowance and fails all of them.
+ * The rest are picked up on later polls.
+ */
+const MAX_VIDEOS_PER_POLL = 1;
+
 export interface YouTubeIngestResult {
   source: string;
   fetched: number;
@@ -61,11 +72,15 @@ export async function ingestYouTubeChannel(
     // Only a video we have not clipped yet is worth queueing; the dedupe key
     // makes a repeated poll a no-op even if the status has not moved on.
     if (data.status === 'discovered' || data.status === 'tracking') {
+      if (queued >= MAX_VIDEOS_PER_POLL) continue;
+
       await admin().from('posts').update({ status: 'selected' }).eq('id', data.id);
+      // Generous retries: the failures worth surviving here are rate limits
+      // and transient CDN errors, both of which pass on their own.
       const id = await enqueue(
         'clip',
         { postId: data.id },
-        { dedupeKey: `clip:${data.id}`, maxAttempts: 2 },
+        { dedupeKey: `clip:${data.id}`, maxAttempts: 5 },
       );
       if (id) queued++;
     }

@@ -75,16 +75,30 @@ export async function transcribe(
   form.set('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'word');
 
-  const res = await fetch(`${baseUrl}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${apiKey}` },
-    body: form,
-    signal: AbortSignal.timeout(10 * 60_000),
-  });
+  // The free tier meters by the minute and a long video is a large single
+  // request, so a rate limit here is routine rather than exceptional. The API
+  // says how long to wait; waiting is much cheaper than re-downloading the
+  // audio on a fresh attempt.
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await fetch(`${baseUrl}/audio/transcriptions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(10 * 60_000),
+    });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Transcription failed (${res.status}): ${body.slice(0, 300)}`);
+    if (res.status !== 429) break;
+
+    const wait = Number(res.headers.get('retry-after') ?? 30) * 1000;
+    await new Promise((r) => setTimeout(r, Math.min(wait, 120_000)));
+  }
+
+  if (!res || !res.ok) {
+    const body = res ? await res.text() : 'no response';
+    throw new Error(
+      `Transcription failed (${res?.status ?? 0}): ${body.slice(0, 300)}`,
+    );
   }
 
   const payload = (await res.json()) as {
