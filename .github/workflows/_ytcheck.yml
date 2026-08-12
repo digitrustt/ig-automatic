@@ -5,19 +5,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - run: |
-          which ffmpeg && ffmpeg -version | head -1
-          python3 -m pip install --upgrade --quiet yt-dlp
-      - name: Full recipe
+      - name: What is actually installed
+        run: |
+          echo "ffmpeg:  $(command -v ffmpeg  || echo BRAK)"
+          echo "ffprobe: $(command -v ffprobe || echo BRAK)"
+          echo "avconv:  $(command -v avconv  || echo BRAK)"
+      - name: Install and probe
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1 || true
+          echo "po apt: ffmpeg=$(command -v ffmpeg || echo BRAK) ffprobe=$(command -v ffprobe || echo BRAK)"
+          python3 -m pip install --upgrade --quiet yt-dlp
           curl -fsSL https://deno.land/install.sh | sh -s -- -y >/dev/null 2>&1
           export PATH="$HOME/.deno/bin:$PATH"
           printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/c.txt"
           yt-dlp --cookies "$RUNNER_TEMP/c.txt" --remote-components ejs:github \
-            --ffmpeg-location "$(dirname "$(which ffmpeg)")" \
             --download-sections "*00:05:00-00:05:20" --force-keyframes-at-cuts \
             -f "bv*[height<=720]+ba/b[height<=720]" --merge-output-format mp4 \
-            -o out.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -8
+            -o out.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -10
           ls -la out.mp4 && echo "WYNIK: OK" || echo "WYNIK: FAIL"
