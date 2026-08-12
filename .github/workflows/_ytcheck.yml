@@ -5,30 +5,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
       - run: python3 -m pip install --upgrade --quiet yt-dlp
-      - name: With Node only
-        env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
-        run: |
-          printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/c.txt"
-          node --version
-          yt-dlp --cookies "$RUNNER_TEMP/c.txt" \
-            --download-sections "*00:05:00-00:05:20" --force-keyframes-at-cuts \
-            -f "bv*[height<=720]+ba/b[height<=720]" --merge-output-format mp4 \
-            -o node.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -8
-          ls -la node.mp4 && echo "NODE: OK" || echo "NODE: FAIL"
-      - name: Install Deno and retry
-        if: always()
+      - name: Deno + remote components
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
           curl -fsSL https://deno.land/install.sh | sh -s -- -y >/dev/null 2>&1
           export PATH="$HOME/.deno/bin:$PATH"
-          deno --version | head -1
-          yt-dlp --cookies "$RUNNER_TEMP/c.txt" \
+          printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/c.txt"
+          yt-dlp --cookies "$RUNNER_TEMP/c.txt" --remote-components ejs:github \
             --download-sections "*00:05:00-00:05:20" --force-keyframes-at-cuts \
             -f "bv*[height<=720]+ba/b[height<=720]" --merge-output-format mp4 \
-            -o deno.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -8
-          ls -la deno.mp4 && echo "DENO: OK" || echo "DENO: FAIL"
+            -o out.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -10
+          ls -la out.mp4 && echo "WYNIK: OK" || echo "WYNIK: FAIL"
+      - name: Without cookies, Deno only
+        if: always()
+        run: |
+          export PATH="$HOME/.deno/bin:$PATH"
+          yt-dlp --remote-components ejs:github \
+            --download-sections "*00:05:00-00:05:10" --force-keyframes-at-cuts \
+            -f "bv*[height<=480]+ba/b[height<=480]" --merge-output-format mp4 \
+            -o nocookie.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -5
+          ls -la nocookie.mp4 && echo "BEZ CIASTECZEK: OK" || echo "BEZ CIASTECZEK: FAIL"
