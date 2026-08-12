@@ -1,13 +1,12 @@
 name: worker
 
-# The runner is the whole compute layer: ffmpeg is preinstalled, the machine
-# has 4 vCPU / 16GB RAM, and each run drains the queue and exits rather than
-# idling. There is no server to keep alive.
+# The runner is the whole compute layer. Each run drains the queue and exits
+# rather than idling — there is no server to keep alive.
 on:
   schedule:
     # Every two hours. On a private repository Actions bills by the minute
-    # against a 2000/month allowance, and clipping runs are long — this cadence
-    # leaves comfortable headroom. Tracked channels publish a few times a week,
+    # against a 2000/month allowance and clipping runs are long, so this
+    # cadence leaves headroom. Tracked channels publish a few times a week,
     # so polling faster would buy very little.
     #
     # Make the repository public and this can drop to '*/30 * * * *': public
@@ -36,17 +35,38 @@ jobs:
 
       - run: npm ci
 
+      # ffmpeg is NOT preinstalled on ubuntu-latest, despite what its docs
+      # imply. Verify with `command -v`, never `ffmpeg -version | head -1`:
+      # in a pipeline the exit status comes from head, so that check passes
+      # even when ffmpeg is missing and the failure surfaces much later.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          command -v ffmpeg && command -v ffprobe
+          ffmpeg -version | head -1
+
       - name: Install yt-dlp
         run: |
           python3 -m pip install --upgrade --quiet yt-dlp
           yt-dlp --version
 
-      - name: Verify ffmpeg
-        run: ffmpeg -version | head -1
+      # YouTube gates its media URLs behind a JavaScript challenge. yt-dlp
+      # solves it with a JS runtime plus a solver script — Deno is the
+      # supported runtime, and the script is fetched via --remote-components
+      # (see the flag in lib/youtube/ytdlp.ts). Node alone is not enough.
+      - name: Install Deno
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
 
-      # YouTube serves runners a bot check on download. A logged-in session
-      # gets through. Written to the runner's temp dir, which is discarded
-      # with the machine, and never to the workspace.
+      - name: Verify Deno
+        run: deno --version | head -1
+
+      # Solving the challenge is necessary but not sufficient: datacenter
+      # addresses also get a "confirm you're not a bot" gate, and only a
+      # logged-in session clears it. Written to the runner temp dir, which
+      # dies with the machine, and never into the workspace.
       - name: Provide YouTube cookies
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
@@ -55,14 +75,13 @@ jobs:
           printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/cookies.txt"
           chmod 600 "$RUNNER_TEMP/cookies.txt"
           echo "YTDLP_COOKIES_FILE=$RUNNER_TEMP/cookies.txt" >> "$GITHUB_ENV"
-          echo "cookie lines: $(wc -l < "$RUNNER_TEMP/cookies.txt")"
 
       - name: Drain the queue
         env:
           WORKER_MODE: batch
           WORKER_ID: gha-${{ github.run_id }}
-          # Under the job timeout, so a long clipping run exits cleanly rather
-          # than being killed mid-upload.
+          # Under the job timeout, so a long clipping run exits cleanly
+          # rather than being killed mid-upload.
           MAX_BATCH_MS: '2400000'
 
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
@@ -76,7 +95,7 @@ jobs:
           TRANSCRIBE_LANGUAGE: ${{ vars.TRANSCRIBE_LANGUAGE || 'pl' }}
 
           POSTING_HOURS: ${{ vars.POSTING_HOURS || '11,17,20' }}
-          # Ubuntu runners ship DejaVu; drawtext needs the file, libass the name.
+          # drawtext needs the file, libass needs the family name.
           FONT_PATH: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
           CAPTION_FONT: DejaVu Sans
         run: npm run worker:prod

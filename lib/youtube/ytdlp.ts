@@ -31,6 +31,17 @@ function cookies(): string[] {
   return file ? ['--cookies', file] : [];
 }
 
+/**
+ * YouTube hides its media URLs behind a JavaScript challenge. Solving it needs
+ * a JS runtime (Deno) *and* a solver script, and yt-dlp will not fetch that
+ * script unless asked — without this flag it reports "n challenge solving
+ * failed" and offers nothing but storyboard images, which reads like a format
+ * problem rather than an authentication one.
+ */
+function challengeSolver(): string[] {
+  return ['--remote-components', 'ejs:github'];
+}
+
 export interface ChannelVideo {
   videoId: string;
   title: string;
@@ -120,6 +131,7 @@ export async function downloadSection(
   await run(ytdlpPath(), [
     ...ffmpegLocation(),
     ...cookies(),
+    ...challengeSolver(),
     '--download-sections', `*${fmt(opts.startSeconds)}-${fmt(opts.endSeconds)}`,
     '--force-keyframes-at-cuts',
     '-f', `bv*[height<=${height}]+ba/b[height<=${height}]`,
@@ -139,6 +151,7 @@ export async function downloadAudio(url: string, dir: string): Promise<string> {
   await run(ytdlpPath(), [
     ...ffmpegLocation(),
     ...cookies(),
+    ...challengeSolver(),
     '-f', 'ba[ext=m4a]/ba',
     '--no-warnings',
     '-o', output,
