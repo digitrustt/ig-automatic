@@ -17,6 +17,20 @@ function ffmpegLocation(): string[] {
   return ['--ffmpeg-location', path.dirname(ffmpeg)];
 }
 
+/**
+ * YouTube serves a bot check to datacenter addresses, which is every CI
+ * runner. A logged-in session gets through; metadata still resolves without
+ * one, so only the download paths need this.
+ *
+ * The cookies belong to a real Google account and grant full access to it —
+ * use a throwaway, keep the file out of the repo, and expect to replace it
+ * every few weeks as the session rotates.
+ */
+function cookies(): string[] {
+  const file = process.env.YTDLP_COOKIES_FILE;
+  return file ? ['--cookies', file] : [];
+}
+
 export interface ChannelVideo {
   videoId: string;
   title: string;
@@ -105,6 +119,7 @@ export async function downloadSection(
 
   await run(ytdlpPath(), [
     ...ffmpegLocation(),
+    ...cookies(),
     '--download-sections', `*${fmt(opts.startSeconds)}-${fmt(opts.endSeconds)}`,
     '--force-keyframes-at-cuts',
     '-f', `bv*[height<=${height}]+ba/b[height<=${height}]`,
@@ -123,6 +138,7 @@ export async function downloadAudio(url: string, dir: string): Promise<string> {
 
   await run(ytdlpPath(), [
     ...ffmpegLocation(),
+    ...cookies(),
     '-f', 'ba[ext=m4a]/ba',
     '--no-warnings',
     '-o', output,

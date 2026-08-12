@@ -44,6 +44,19 @@ jobs:
       - name: Verify ffmpeg
         run: ffmpeg -version | head -1
 
+      # YouTube serves runners a bot check on download. A logged-in session
+      # gets through. Written to the runner's temp dir, which is discarded
+      # with the machine, and never to the workspace.
+      - name: Provide YouTube cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        if: ${{ env.YOUTUBE_COOKIES != '' }}
+        run: |
+          printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/cookies.txt"
+          chmod 600 "$RUNNER_TEMP/cookies.txt"
+          echo "YTDLP_COOKIES_FILE=$RUNNER_TEMP/cookies.txt" >> "$GITHUB_ENV"
+          echo "cookie lines: $(wc -l < "$RUNNER_TEMP/cookies.txt")"
+
       - name: Drain the queue
         env:
           WORKER_MODE: batch
