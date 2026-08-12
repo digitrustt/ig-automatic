@@ -1,0 +1,69 @@
+name: worker
+
+# The runner is the whole compute layer: ffmpeg is preinstalled, the machine
+# has 4 vCPU / 16GB RAM, and each run drains the queue and exits rather than
+# idling. There is no server to keep alive.
+on:
+  schedule:
+    # Every two hours. On a private repository Actions bills by the minute
+    # against a 2000/month allowance, and clipping runs are long — this cadence
+    # leaves comfortable headroom. Tracked channels publish a few times a week,
+    # so polling faster would buy very little.
+    #
+    # Make the repository public and this can drop to '*/30 * * * *': public
+    # repositories get unmetered minutes.
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+# A second run starting mid-render would fight the first over the same jobs.
+# The queue's row locks make that safe, but serialising is cheaper.
+concurrency:
+  group: worker
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install yt-dlp
+        run: |
+          python3 -m pip install --upgrade --quiet yt-dlp
+          yt-dlp --version
+
+      - name: Verify ffmpeg
+        run: ffmpeg -version | head -1
+
+      - name: Drain the queue
+        env:
+          WORKER_MODE: batch
+          WORKER_ID: gha-${{ github.run_id }}
+          # Under the job timeout, so a long clipping run exits cleanly rather
+          # than being killed mid-upload.
+          MAX_BATCH_MS: '2400000'
+
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+          COPY_PROVIDER: cloud
+          COPY_LANGUAGE: ${{ vars.COPY_LANGUAGE || 'Polish' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.groq.com/openai/v1' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/gpt-oss-120b' }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          TRANSCRIBE_LANGUAGE: ${{ vars.TRANSCRIBE_LANGUAGE || 'pl' }}
+
+          POSTING_HOURS: ${{ vars.POSTING_HOURS || '11,17,20' }}
+          # Ubuntu runners ship DejaVu; drawtext needs the file, libass the name.
+          FONT_PATH: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+          CAPTION_FONT: DejaVu Sans
+        run: npm run worker:prod
