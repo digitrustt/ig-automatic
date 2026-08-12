@@ -3,22 +3,32 @@ on: workflow_dispatch
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
       - run: python3 -m pip install --upgrade --quiet yt-dlp
-      - name: List formats
+      - name: With Node only
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
           printf '%s' "$YOUTUBE_COOKIES" > "$RUNNER_TEMP/c.txt"
-          yt-dlp --cookies "$RUNNER_TEMP/c.txt" --list-formats \
-            "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -40 || true
-      - name: Try simple format
+          node --version
+          yt-dlp --cookies "$RUNNER_TEMP/c.txt" \
+            --download-sections "*00:05:00-00:05:20" --force-keyframes-at-cuts \
+            -f "bv*[height<=720]+ba/b[height<=720]" --merge-output-format mp4 \
+            -o node.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -8
+          ls -la node.mp4 && echo "NODE: OK" || echo "NODE: FAIL"
+      - name: Install Deno and retry
+        if: always()
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y >/dev/null 2>&1
+          export PATH="$HOME/.deno/bin:$PATH"
+          deno --version | head -1
           yt-dlp --cookies "$RUNNER_TEMP/c.txt" \
             --download-sections "*00:05:00-00:05:20" --force-keyframes-at-cuts \
-            -f "best[height<=720]/best" --merge-output-format mp4 \
-            -o out.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -15
-          ls -la out.mp4 || true
+            -f "bv*[height<=720]+ba/b[height<=720]" --merge-output-format mp4 \
+            -o deno.mp4 "https://www.youtube.com/watch?v=cfUl6dfiqyY" 2>&1 | tail -8
+          ls -la deno.mp4 && echo "DENO: OK" || echo "DENO: FAIL"
