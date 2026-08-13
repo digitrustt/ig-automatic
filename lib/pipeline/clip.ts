@@ -1,4 +1,5 @@
 import { generateCopy } from '@/lib/ai/copy';
+import { checkOnScreenText } from '@/lib/ai/guard';
 import { selectSegments, type Segment } from '@/lib/ai/segments';
 import { extractAudio, transcribe, windowText, type Transcript } from '@/lib/ai/transcribe';
 import { errorMessage } from '@/lib/errors';
@@ -136,6 +137,14 @@ async function renderClip(
   // The segment's own hook is written against the clip's content; the copy
   // generator only sees a transcript window, so prefer the former.
   const hookText = segment.hook || copy.hook;
+
+  // Checked here rather than at publish time: the guard's whole job is to
+  // stop the text before it is burned into pixels, after which it can only
+  // be fixed by re-rendering.
+  const guard = checkOnScreenText(hookText);
+  if (!guard.ok) {
+    throw new Error(`Hook rejected (${guard.reason}): ${hookText.slice(0, 80)}`);
+  }
 
   const { outputPath, info } = await remix(source, dir, {
     hookText,
