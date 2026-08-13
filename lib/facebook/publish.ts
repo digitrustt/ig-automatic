@@ -1,6 +1,4 @@
-import { stat } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import { Readable } from 'node:stream';
+import { readFile } from 'node:fs/promises';
 import { graphPost } from '@/lib/instagram/graph';
 
 export interface FacebookReelInput {
@@ -55,32 +53,39 @@ export async function publishFacebookReel(
 }
 
 /**
- * Streams the file to Facebook's upload host.
+ * Sends the file to Facebook's upload host.
  *
- * This endpoint is not the Graph API: it takes the token in an `OAuth` header
- * rather than a query parameter, and the body is the raw file rather than a
- * form. Sending it the Graph way fails with an unhelpful error.
+ * This endpoint is not the Graph API and does not behave like it: the token
+ * goes in an `OAuth` header rather than a query parameter, and the body is raw
+ * bytes rather than a form.
+ *
+ * It also insists on knowing the length up front — both `Content-Length` and
+ * `X-Entity-Length` — so the file is buffered rather than streamed. A stream
+ * makes fetch use chunked encoding, which this endpoint rejects. Buffering is
+ * safe here because renditions are capped at 50MB before they are ever stored.
  */
 async function uploadBytes(
   uploadUrl: string,
   accessToken: string,
   videoPath: string,
 ): Promise<void> {
-  const { size } = await stat(videoPath);
+  const bytes = await readFile(videoPath);
 
   const res = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
       authorization: `OAuth ${accessToken}`,
       offset: '0',
-      file_size: String(size),
+      file_size: String(bytes.byteLength),
+      'content-length': String(bytes.byteLength),
+      'X-Entity-Length': String(bytes.byteLength),
+      'X-Entity-Name': 'reel.mp4',
+      'X-Entity-Type': 'video/mp4',
       'content-type': 'application/octet-stream',
     },
-    body: Readable.toWeb(createReadStream(videoPath)) as ReadableStream,
-    // Required by fetch when the body is a stream.
-    duplex: 'half',
+    body: new Uint8Array(bytes),
     signal: AbortSignal.timeout(10 * 60_000),
-  } as RequestInit & { duplex: 'half' });
+  });
 
   if (!res.ok) {
     const body = await res.text();
