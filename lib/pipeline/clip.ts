@@ -10,7 +10,7 @@ import { enqueue } from '@/lib/queue';
 import { uploadRendition } from '@/lib/storage';
 import { admin } from '@/lib/supabase/admin';
 import type { Account, Post } from '@/lib/types/db';
-import { accountForNiche, recentHooks } from './targeting';
+import { accountForNiche, accountsForNiche, recentHooks } from './targeting';
 import { downloadAudio, downloadSection } from '@/lib/youtube/ytdlp';
 
 export interface ClipResult {
@@ -175,9 +175,13 @@ async function renderClip(
     .single();
   if (error) throw error;
 
-  await enqueue(
-    'publish',
-    { renditionId: rendition.id, accountId: account.id },
-    { dedupeKey: `publish:${rendition.id}` },
-  );
+  // One publication per platform: the same clip goes to Instagram and to the
+  // Facebook Page, each scheduled and retried independently.
+  for (const target of await accountsForNiche(post.niche)) {
+    await enqueue(
+      'publish',
+      { renditionId: rendition.id, accountId: target.id },
+      { dedupeKey: `publish:${rendition.id}:${target.id}` },
+    );
+  }
 }

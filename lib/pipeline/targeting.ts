@@ -14,21 +14,36 @@ export const ALL_NICHES = '*';
  * wildcard expresses: score per niche, publish across all of them.
  */
 export async function accountForNiche(niche: string): Promise<Account | null> {
+  const accounts = await accountsForNiche(niche);
+  return accounts.find((a) => a.platform === 'instagram') ?? accounts[0] ?? null;
+}
+
+/**
+ * Every account a clip should go to — one per platform.
+ *
+ * The same rendition is published to Instagram and to a Facebook Page, so the
+ * fan-out happens here rather than in each pipeline. Within a platform a
+ * niche-specific account still beats a catch-all one; across platforms all of
+ * them get it.
+ */
+export async function accountsForNiche(niche: string): Promise<Account[]> {
   const { data, error } = await admin()
     .from('accounts')
     .select('*')
-    .eq('platform', 'instagram')
     .eq('enabled', true)
     .in('niche', [niche, ALL_NICHES]);
   if (error) throw error;
 
-  const accounts = (data ?? []) as Account[];
-  // An account dedicated to this niche outranks a catch-all one.
-  return (
-    accounts.find((a) => a.niche === niche) ??
-    accounts.find((a) => a.niche === ALL_NICHES) ??
-    null
-  );
+  const byPlatform = new Map<string, Account>();
+  for (const account of (data ?? []) as Account[]) {
+    const current = byPlatform.get(account.platform);
+    // An account dedicated to this niche outranks a catch-all one.
+    if (!current || (current.niche === ALL_NICHES && account.niche === niche)) {
+      byPlatform.set(account.platform, account);
+    }
+  }
+
+  return [...byPlatform.values()];
 }
 
 /** Last 20 hooks we published, so the generator does not repeat a formula. */

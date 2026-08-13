@@ -1,4 +1,4 @@
-export type Platform = 'instagram' | 'tiktok' | 'youtube';
+export type Platform = 'instagram' | 'tiktok' | 'youtube' | 'facebook';
 
 export type SourceKind =
   | 'ig_hashtag_graph'

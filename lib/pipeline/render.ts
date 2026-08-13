@@ -8,7 +8,7 @@ import { enqueue } from '@/lib/queue';
 import { uploadRendition } from '@/lib/storage';
 import { admin } from '@/lib/supabase/admin';
 import type { Post } from '@/lib/types/db';
-import { accountForNiche, recentHooks } from './targeting';
+import { accountForNiche, accountsForNiche, recentHooks } from './targeting';
 
 export interface RenderResult {
   postId: string;
@@ -91,11 +91,13 @@ export async function renderPost(postId: string): Promise<RenderResult> {
         .update({ status: 'ready', phash })
         .eq('id', postId);
 
-      await enqueue(
-        'publish',
-        { renditionId: rendition.id, accountId: account.id },
-        { dedupeKey: `publish:${rendition.id}` },
-      );
+      for (const target of await accountsForNiche(p.niche)) {
+        await enqueue(
+          'publish',
+          { renditionId: rendition.id, accountId: target.id },
+          { dedupeKey: `publish:${rendition.id}:${target.id}` },
+        );
+      }
 
       return { postId, renditionId: rendition.id as string };
     });

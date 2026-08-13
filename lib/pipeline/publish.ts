@@ -1,6 +1,9 @@
 import { getConfig } from '@/lib/config';
 import { errorMessage } from '@/lib/errors';
+import { publishFacebookReel } from '@/lib/facebook/publish';
 import { fetchReelInsights, publishReel } from '@/lib/instagram/publish';
+import { downloadTo } from '@/lib/media/download';
+import { withTempDir } from '@/lib/media/ffmpeg';
 import { enqueue } from '@/lib/queue';
 import { refreshSignedUrl } from '@/lib/storage';
 import { admin } from '@/lib/supabase/admin';
@@ -135,7 +138,7 @@ export interface PushResult {
   permalink?: string | null;
 }
 
-/** Pushes a scheduled publication to Instagram. */
+/** Pushes a scheduled publication to whichever platform it targets. */
 export async function pushPublication(publicationId: string): Promise<PushResult> {
   const config = await getConfig();
 
@@ -177,16 +180,11 @@ export async function pushPublication(publicationId: string): Promise<PushResult
     .eq('id', publicationId);
 
   try {
-    // The URL stored at render time may have outlived its signature.
-    const videoUrl = await refreshSignedUrl(pub.renditions.storage_path);
     const caption = buildCaption(pub.renditions);
-
-    const result = await publishReel({
-      igUserId: pub.accounts.platform_user_id,
-      accessToken: pub.accounts.access_token,
-      videoUrl,
-      caption,
-    });
+    const result =
+      pub.accounts.platform === 'facebook'
+        ? await pushToFacebook(pub.accounts, pub.renditions.storage_path, caption)
+        : await pushToInstagram(pub.accounts, pub.renditions.storage_path, caption);
 
     await admin()
       .from('publications')
@@ -225,6 +223,51 @@ export async function pushPublication(publicationId: string): Promise<PushResult
       .eq('id', publicationId);
     throw err;
   }
+}
+
+interface PushOutcome {
+  mediaId: string;
+  permalink: string | null;
+}
+
+/** Instagram fetches the file itself, so it only needs a signed URL. */
+async function pushToInstagram(
+  account: Account,
+  storagePath: string,
+  caption: string,
+): Promise<PushOutcome> {
+  // The URL stored at render time may have outlived its signature.
+  const videoUrl = await refreshSignedUrl(storagePath);
+
+  return publishReel({
+    igUserId: account.platform_user_id,
+    accessToken: account.access_token!,
+    videoUrl,
+    caption,
+  });
+}
+
+/**
+ * Facebook will not fetch from a URL — the bytes have to be pushed to it — so
+ * the clip makes a round trip through the runner's disk on its way out.
+ */
+async function pushToFacebook(
+  account: Account,
+  storagePath: string,
+  caption: string,
+): Promise<PushOutcome> {
+  const videoUrl = await refreshSignedUrl(storagePath);
+
+  return withTempDir(async (dir) => {
+    const file = await downloadTo(videoUrl, dir, 'reel.mp4');
+    const result = await publishFacebookReel({
+      pageId: account.platform_user_id,
+      accessToken: account.access_token!,
+      videoPath: file,
+      description: caption,
+    });
+    return { mediaId: result.videoId, permalink: result.permalink };
+  });
 }
 
 function buildCaption(rendition: Rendition): string {
