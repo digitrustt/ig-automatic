@@ -24,14 +24,14 @@ const MAX_VIDEOS_PER_POLL = 1;
  * Stop clipping once this many finished clips are waiting to go out.
  *
  * Supply and demand are wildly mismatched here: one video yields several
- * clips, a handful of tracked channels publish daily, and the account posts
- * three times a day. Without a brake the pipeline would render a hundred clips
- * for every three published — burning the transcription allowance, the storage
- * quota and the CI minutes on work that expires before it airs.
+ * clips, a handful of tracked channels publish daily, and the account posts a
+ * few times a day. Without a brake the pipeline would render clips by the
+ * hundred for a handful published — burning the transcription allowance, the
+ * storage quota and the CI minutes on work that expires before it airs.
  *
  * Roughly a week of posting, so a channel going quiet never starves the queue.
  */
-const MAX_UNPUBLISHED_CLIPS = 21;
+const MAX_UNPUBLISHED_CLIPS = 30;
 
 export interface YouTubeIngestResult {
   source: string;
