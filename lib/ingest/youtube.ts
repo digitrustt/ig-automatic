@@ -20,10 +20,37 @@ const MAX_VIDEO_AGE_DAYS = 14;
  */
 const MAX_VIDEOS_PER_POLL = 1;
 
+/**
+ * Stop clipping once this many finished clips are waiting to go out.
+ *
+ * Supply and demand are wildly mismatched here: one video yields several
+ * clips, a handful of tracked channels publish daily, and the account posts
+ * three times a day. Without a brake the pipeline would render a hundred clips
+ * for every three published — burning the transcription allowance, the storage
+ * quota and the CI minutes on work that expires before it airs.
+ *
+ * Roughly a week of posting, so a channel going quiet never starves the queue.
+ */
+const MAX_UNPUBLISHED_CLIPS = 21;
+
 export interface YouTubeIngestResult {
   source: string;
   fetched: number;
   queued: number;
+  skipped?: string;
+}
+
+/**
+ * Clips waiting for their slot. Every finished clip is scheduled straight
+ * away, so this is the whole queue of work already done and not yet aired.
+ */
+async function backlogSize(): Promise<number> {
+  const { count, error } = await admin()
+    .from('publications')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'scheduled');
+  if (error) throw error;
+  return count ?? 0;
 }
 
 /**
@@ -38,6 +65,20 @@ export interface YouTubeIngestResult {
 export async function ingestYouTubeChannel(
   source: Source,
 ): Promise<YouTubeIngestResult> {
+  const backlog = await backlogSize();
+  if (backlog >= MAX_UNPUBLISHED_CLIPS) {
+    await admin()
+      .from('sources')
+      .update({ last_polled_at: new Date().toISOString() })
+      .eq('id', source.id);
+    return {
+      source: `yt_channel:${source.handle}`,
+      fetched: 0,
+      queued: 0,
+      skipped: `backlog_${backlog}`,
+    };
+  }
+
   const videos = await listChannelVideos(source.handle, 5);
   const cutoff = Date.now() - MAX_VIDEO_AGE_DAYS * 86400_000;
 
