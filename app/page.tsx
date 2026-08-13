@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getConfig } from '@/lib/config';
 import { admin } from '@/lib/supabase/admin';
 import type { Config, Post, Publication, Rendition } from '@/lib/types/db';
@@ -78,11 +79,19 @@ export default async function Dashboard() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">ig-automatic</h1>
-        <p className="mt-1 text-sm text-muted">
-          Wykrywanie trendów, remiks i publikacja Reelsów
-        </p>
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">ig-automatic</h1>
+          <p className="mt-1 text-sm text-muted">
+            Wykrywanie trendów, remiks i publikacja Reelsów
+          </p>
+        </div>
+        <Link
+          href="/podglad"
+          className="rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-background"
+        >
+          Podgląd klipów →
+        </Link>
       </header>
 
       <ModeBanner config={config} />
