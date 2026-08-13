@@ -43,29 +43,44 @@ export async function scheduleRendition(
   if (!acc.enabled) return { skipped: 'account_disabled' };
 
   const dailyLimit = Math.min(acc.daily_post_limit, config.max_posts_per_day);
-  const slot = await nextFreeSlot(accountId, dailyLimit);
-  if (!slot) return { skipped: 'daily_limit_reached' };
 
-  const { data, error } = await admin()
-    .from('publications')
-    .insert({
-      rendition_id: renditionId,
-      account_id: accountId,
-      scheduled_for: slot.toISOString(),
-      status: 'scheduled',
-    })
-    .select('id')
-    .single();
-  if (error) throw error;
+  // Concurrent schedulers can read the same free slot before either writes.
+  // A unique index rejects the loser, so treat that as "someone took it" and
+  // look again rather than trusting the first answer.
+  for (let attempt = 0; attempt < MAX_SLOT_ATTEMPTS; attempt++) {
+    const slot = await nextFreeSlot(accountId, dailyLimit);
+    if (!slot) return { skipped: 'daily_limit_reached' };
 
-  await enqueue(
-    'publish',
-    { publicationId: data.id },
-    { runAfter: slot, dedupeKey: `push:${data.id}` },
-  );
+    const { data, error } = await admin()
+      .from('publications')
+      .insert({
+        rendition_id: renditionId,
+        account_id: accountId,
+        scheduled_for: slot.toISOString(),
+        status: 'scheduled',
+      })
+      .select('id')
+      .single();
 
-  return { publicationId: data.id as string };
+    if (error) {
+      if (error.code === '23505') continue; // slot taken between read and write
+      throw error;
+    }
+
+    await enqueue(
+      'publish',
+      { publicationId: data.id },
+      { runAfter: slot, dedupeKey: `push:${data.id}` },
+    );
+
+    return { publicationId: data.id as string };
+  }
+
+  return { skipped: 'no_free_slot' };
 }
+
+/** Enough to outlast a handful of schedulers competing for the same day. */
+const MAX_SLOT_ATTEMPTS = 10;
 
 /**
  * Walks today's and tomorrow's posting hours, returning the first that is in
