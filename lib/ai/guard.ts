@@ -22,11 +22,6 @@ export interface GuardResult {
   reason?: string;
 }
 
-/**
- * Whisper mishears, and a mistranscribed obscenity reads as deliberate once it
- * is on screen. Cheaper to drop the clip than to publish it: a long video
- * yields several, and losing one costs nothing.
- */
 export function checkOnScreenText(text: string): GuardResult {
   const normalised = text
     .toLowerCase()

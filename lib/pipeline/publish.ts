@@ -86,6 +86,15 @@ export async function scheduleRendition(
 const MAX_SLOT_ATTEMPTS = 10;
 
 /**
+ * How early a run may still publish its slot.
+ *
+ * The worker wakes on a two-hour cycle, so a job for 18:00 is picked up at
+ * 18:00 at the earliest — but clock skew between the runner and the database
+ * should not push a post to the next cycle two hours later.
+ */
+const SLOT_TOLERANCE_MS = 60_000;
+
+/**
  * Walks today's and tomorrow's posting hours, returning the first that is in
  * the future and not already booked. Returns null once the daily cap is spent
  * on both days.
@@ -151,6 +160,23 @@ export async function pushPublication(publicationId: string): Promise<PushResult
 
   const pub = data as Publication & { renditions: Rendition; accounts: Account };
   if (pub.status !== 'scheduled') {
+    return { publicationId, status: 'deferred' };
+  }
+
+  // The queue decides when a job runs, but the publication owns its time.
+  // Move a slot in the database and the job keeps its original delay, which
+  // is how several posts once went out an hour early and minutes apart. Trust
+  // the row, not the job, and hand the job back if the slot has not arrived.
+  const due = new Date(pub.scheduled_for).getTime();
+  if (due > Date.now() + SLOT_TOLERANCE_MS) {
+    await enqueue(
+      'publish',
+      { publicationId },
+      {
+        runAfter: new Date(due),
+        dedupeKey: `push:${publicationId}:${due}`,
+      },
+    );
     return { publicationId, status: 'deferred' };
   }
 

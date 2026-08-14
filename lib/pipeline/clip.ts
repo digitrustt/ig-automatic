@@ -128,6 +128,7 @@ async function renderClip(
   });
 
   const spoken = windowText(transcript.words, segment.start, segment.end);
+
   const copy = await generateCopy({
     post: { ...post, caption: spoken || post.caption },
     brandHandle: `@${account.handle}`,

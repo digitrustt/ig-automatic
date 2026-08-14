@@ -6,6 +6,8 @@ export const SegmentSchema = z.object({
   end: z.number(),
   hook: z.string(),
   reason: z.string().optional(),
+  /** True when the passage is the host selling something, not their content. */
+  sponsor: z.boolean().optional(),
 });
 
 export type Segment = z.infer<typeof SegmentSchema>;
@@ -29,6 +31,10 @@ What earns a clip:
   confrontation, a number that surprises, a story told in three sentences.
 - It stands alone. If understanding it needs a fact from earlier in the video,
   it is not a clip.
+- It is the video's own content. Never take a sponsor read or an advert — a
+  discount code, a product pitch, "the partner of this episode". These look
+  perfect from a transcript, because an advert is written to stand alone and
+  end on a call to action. They are worthless as clips.
 - It opens on something worth staying for. A clip that starts mid-sentence on a
   transition has already lost.
 
@@ -45,8 +51,14 @@ situation and withhold the outcome. "Zapłacił 129 zł za kebaba" works because
 the price is absurd and the verdict is still coming. Write the hook only after
 you know what the clip's payoff is, then promise exactly that.
 
+Mark every passage that is an advert with "sponsor": true — including ones you
+would otherwise have skipped. Note the difference: a host praising a product
+they were paid for is an advert; a host reporting on somebody else's ad deal is
+not, and that is ordinary content.
+
 Reply with JSON only: {"segments": [{"start": number, "end": number,
-"hook": string, "reason": string}]} where start and end are seconds.`;
+"hook": string, "reason": string, "sponsor": boolean}]} where start and end
+are seconds.`;
 
 const SCHEMA = {
   type: 'object',
@@ -60,8 +72,13 @@ const SCHEMA = {
           end: { type: 'number', description: 'Clip end in seconds.' },
           hook: { type: 'string', description: 'On-screen line, under 60 characters.' },
           reason: { type: 'string', description: 'Why this stands alone.' },
+          sponsor: {
+            type: 'boolean',
+            description:
+              'True if this passage is an advert read by the host — a product pitch, a discount code, a sponsor mention. False for the video\'s own content, including when it merely discusses advertising.',
+          },
         },
-        required: ['start', 'end', 'hook', 'reason'],
+        required: ['start', 'end', 'hook', 'reason', 'sponsor'],
         additionalProperties: false,
       },
     },
@@ -228,6 +245,11 @@ export function sanitize(
       end: Math.max(0, Math.min(s.end, durationSeconds)),
       hook: s.hook.trim(),
     }))
+    // Adverts read well from a transcript — self-contained, ending on a call
+    // to action — which is exactly why they have to be excluded explicitly.
+    // A keyword list gets this backwards: real sponsor reads avoid the word
+    // "advert", while genuine reporting about an ad deal is full of it.
+    .filter((s) => !s.sponsor)
     .filter((s) => s.end - s.start >= MIN_SEGMENT_SECONDS && s.hook.length > 0)
     .map((s) => ({
       ...s,
