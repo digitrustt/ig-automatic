@@ -45,13 +45,20 @@ export async function scheduleRendition(
   const acc = account as Account;
   if (!acc.enabled) return { skipped: 'account_disabled' };
 
+  const { data: rendition, error: rendErr } = await admin()
+    .from('renditions')
+    .select('post_id')
+    .eq('id', renditionId)
+    .single();
+  if (rendErr) throw rendErr;
+
   const dailyLimit = Math.min(acc.daily_post_limit, config.max_posts_per_day);
 
   // Concurrent schedulers can read the same free slot before either writes.
   // A unique index rejects the loser, so treat that as "someone took it" and
   // look again rather than trusting the first answer.
   for (let attempt = 0; attempt < MAX_SLOT_ATTEMPTS; attempt++) {
-    const slot = await nextFreeSlot(accountId, dailyLimit);
+    const slot = await nextFreeSlot(accountId, dailyLimit, rendition.post_id);
     if (!slot) return { skipped: 'daily_limit_reached' };
 
     const { data, error } = await admin()
@@ -94,19 +101,28 @@ const MAX_SLOT_ATTEMPTS = 10;
  */
 const SLOT_TOLERANCE_MS = 60_000;
 
+/** How far ahead a clip may be booked before we give up on finding a slot. */
+const SCHEDULING_HORIZON_DAYS = 14;
+
 /**
- * Walks today's and tomorrow's posting hours, returning the first that is in
- * the future and not already booked. Returns null once the daily cap is spent
- * on both days.
+ * Finds the next free posting slot, skipping days that already carry a clip
+ * from the same source video.
+ *
+ * One long video yields half a dozen clips at once, and slots are filled in
+ * the order clips are made — so without this the whole day becomes one
+ * creator, and often one segment of one video, told three times. Spreading
+ * them means every day mixes sources, which is what a followed account looks
+ * like rather than a dump.
  */
 async function nextFreeSlot(
   accountId: string,
   dailyLimit: number,
+  postId: string,
 ): Promise<Date | null> {
   const hours = postingHours();
   const now = Date.now();
 
-  for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+  for (let dayOffset = 0; dayOffset <= SCHEDULING_HORIZON_DAYS; dayOffset++) {
     const day = new Date();
     day.setUTCDate(day.getUTCDate() + dayOffset);
     day.setUTCHours(0, 0, 0, 0);
@@ -116,15 +132,20 @@ async function nextFreeSlot(
 
     const { data, error } = await admin()
       .from('publications')
-      .select('scheduled_for')
+      .select('scheduled_for, renditions(post_id)')
       .eq('account_id', accountId)
       .neq('status', 'failed')
       .gte('scheduled_for', day.toISOString())
       .lt('scheduled_for', dayEnd.toISOString());
     if (error) throw error;
 
-    const booked = data as Array<{ scheduled_for: string }>;
+    const booked = data as unknown as Array<{
+      scheduled_for: string;
+      renditions: { post_id: string } | null;
+    }>;
+
     if (booked.length >= dailyLimit) continue;
+    if (booked.some((b) => b.renditions?.post_id === postId)) continue;
 
     const takenHours = new Set(
       booked.map((b) => new Date(b.scheduled_for).getUTCHours()),
