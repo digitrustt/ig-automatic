@@ -101,6 +101,44 @@ const MAX_SLOT_ATTEMPTS = 10;
  */
 const SLOT_TOLERANCE_MS = 60_000;
 
+/**
+ * How late a slot may still be honoured.
+ *
+ * Beyond this the moment has passed — posting a 16:00 slot at 20:30 lands in
+ * a different audience and, worse, next to whatever else the delay bunched up
+ * with it. Rebooking costs nothing; the clip keeps.
+ */
+const MAX_SLOT_DELAY_MS = 75 * 60_000;
+
+/** Minimum spacing between two posts on one account, whatever the queue says. */
+const MIN_GAP_MS = 45 * 60_000;
+
+/** When this account last put something out, or null if it never has. */
+async function lastPublishedAt(accountId: string): Promise<number | null> {
+  const { data, error } = await admin()
+    .from('publications')
+    .select('published_at')
+    .eq('account_id', accountId)
+    .eq('status', 'published')
+    .not('published_at', 'is', null)
+    .order('published_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+
+  const at = (data as { published_at: string } | null)?.published_at;
+  return at ? new Date(at).getTime() : null;
+}
+
+/** Hands the job back to the queue for a later time. */
+async function deferToSlot(publicationId: string, when: Date): Promise<void> {
+  await enqueue(
+    'publish',
+    { publicationId },
+    { runAfter: when, dedupeKey: `push:${publicationId}:${when.getTime()}` },
+  );
+}
+
 /** How far ahead a clip may be booked before we give up on finding a slot. */
 const SCHEDULING_HORIZON_DAYS = 14;
 
@@ -190,15 +228,33 @@ export async function pushPublication(publicationId: string): Promise<PushResult
   // the row, not the job, and hand the job back if the slot has not arrived.
   const due = new Date(pub.scheduled_for).getTime();
   if (due > Date.now() + SLOT_TOLERANCE_MS) {
-    await enqueue(
-      'publish',
-      { publicationId },
-      {
-        runAfter: new Date(due),
-        dedupeKey: `push:${publicationId}:${due}`,
-      },
-    );
+    await deferToSlot(publicationId, new Date(due));
     return { publicationId, status: 'deferred' };
+  }
+
+  // Hosted cron is a request, not a promise: scheduled runs get delayed and
+  // sometimes skipped. Several slots then come due at once and the whole
+  // backlog fires in the same minute — the burst the spacing exists to avoid.
+  // A slot that has gone stale is rebooked rather than fired late, and two
+  // posts never leave the same account back to back.
+  const staleBy = Date.now() - due;
+  const recent = await lastPublishedAt(pub.account_id);
+  const tooSoon = recent !== null && Date.now() - recent < MIN_GAP_MS;
+
+  if (staleBy > MAX_SLOT_DELAY_MS || tooSoon) {
+    const next = await nextFreeSlot(
+      pub.account_id,
+      Math.min(pub.accounts.daily_post_limit, config.max_posts_per_day),
+      pub.renditions.post_id,
+    );
+    if (next) {
+      await admin()
+        .from('publications')
+        .update({ scheduled_for: next.toISOString() })
+        .eq('id', publicationId);
+      await deferToSlot(publicationId, next);
+      return { publicationId, status: 'deferred' };
+    }
   }
 
   // Two independent brakes: the kill-switch and the dry run. Shadow mode is
