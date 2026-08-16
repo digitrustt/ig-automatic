@@ -31,7 +31,7 @@ const MAX_VIDEOS_PER_POLL = 1;
  *
  * Roughly a week of posting, so a channel going quiet never starves the queue.
  */
-const MAX_UNPUBLISHED_CLIPS = 70;
+const MAX_UNPUBLISHED_CLIPS = 56;
 
 export interface YouTubeIngestResult {
   source: string;
