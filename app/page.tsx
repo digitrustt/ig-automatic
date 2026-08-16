@@ -12,11 +12,12 @@ type Candidate = Pick<
 
 type UpcomingRow = Pick<Publication, 'id' | 'scheduled_for' | 'status'> & {
   renditions: Pick<Rendition, 'hook_text'> | null;
-  accounts: { handle: string } | null;
+  accounts: { handle: string; platform: string } | null;
 };
 
 type RecentRow = Pick<Publication, 'id' | 'published_at' | 'permalink' | 'status'> & {
   renditions: Pick<Rendition, 'hook_text'> | null;
+  accounts: { handle: string; platform: string } | null;
   publication_metrics: Array<{ views: number | null; likes: number | null }>;
 };
 
@@ -35,14 +36,14 @@ async function loadDashboard() {
       .limit(15),
     db
       .from('publications')
-      .select('id, scheduled_for, status, renditions(hook_text), accounts(handle)')
+      .select('id, scheduled_for, status, renditions(hook_text), accounts(handle, platform)')
       .in('status', ['scheduled', 'publishing'])
       .order('scheduled_for', { ascending: true })
       .limit(10),
     db
       .from('publications')
       .select(
-        'id, published_at, permalink, status, renditions(hook_text), publication_metrics(views, likes)',
+        'id, published_at, permalink, status, accounts(handle, platform), renditions(hook_text), publication_metrics(views, likes)',
       )
       .in('status', ['published', 'skipped_shadow', 'failed'])
       .order('created_at', { ascending: false })
@@ -140,11 +141,11 @@ export default async function Dashboard() {
         {upcoming.length === 0 ? (
           <Empty>Nic w kolejce.</Empty>
         ) : (
-          <Table headers={['Termin', 'Konto', 'Hook', 'Status']}>
+          <Table headers={['Termin', 'Gdzie', 'Hook', 'Status']}>
             {upcoming.map((p) => (
               <tr key={p.id} className="border-t border-border">
                 <Td className="tabular-nums">{formatDate(p.scheduled_for)}</Td>
-                <Td className="text-muted">@{p.accounts?.handle ?? '—'}</Td>
+                <Td><PlatformTag platform={p.accounts?.platform} /></Td>
                 <Td className="max-w-xs truncate">{p.renditions?.hook_text ?? '—'}</Td>
                 <Td>
                   <Badge>{p.status}</Badge>
@@ -159,12 +160,13 @@ export default async function Dashboard() {
         {recent.length === 0 ? (
           <Empty>Jeszcze nic nie poszło w świat.</Empty>
         ) : (
-          <Table headers={['Data', 'Hook', 'Wyświetlenia', 'Polubienia', 'Status']}>
+          <Table headers={['Data', 'Gdzie', 'Hook', 'Wyświetlenia', 'Polubienia', 'Status']}>
             {recent.map((p) => {
               const latest = p.publication_metrics?.[0];
               return (
                 <tr key={p.id} className="border-t border-border">
                   <Td className="tabular-nums">{formatDate(p.published_at)}</Td>
+                  <Td><PlatformTag platform={p.accounts?.platform} /></Td>
                   <Td className="max-w-xs truncate">
                     {p.permalink ? (
                       <a
@@ -269,6 +271,20 @@ function Table({
 
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-4 py-2.5 ${className}`}>{children}</td>;
+}
+
+/**
+ * Every clip goes to both platforms in the same slot, so the list shows each
+ * one twice. Without this the two rows read as an accidental double post —
+ * the handles differ only in capitalisation.
+ */
+function PlatformTag({ platform }: { platform?: string }) {
+  const label = platform === 'facebook' ? 'FB' : platform === 'instagram' ? 'IG' : '—';
+  return (
+    <span className="rounded bg-background px-1.5 py-0.5 text-xs font-medium">
+      {label}
+    </span>
+  );
 }
 
 function Badge({ children }: { children: React.ReactNode }) {
