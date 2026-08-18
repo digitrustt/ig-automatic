@@ -42,6 +42,17 @@ const MAX_UNPUBLISHED_CLIPS = 56;
  */
 const ARCHIVE_PAGE_SIZE = 40;
 
+/**
+ * How many recent uploads a threshold source looks at.
+ *
+ * A view threshold is a delayed verdict: a video published an hour ago has not
+ * earned its views yet, and rejecting it is not final — the next poll weighs it
+ * again. That only works while the video is still in the listing, so a channel
+ * publishing several times a day needs a window measured in days, not in
+ * uploads.
+ */
+const THRESHOLD_PAGE_SIZE = 25;
+
 export interface YouTubeIngestResult {
   source: string;
   fetched: number;
@@ -97,9 +108,15 @@ export async function ingestYouTubeChannel(
   // newest, so the age window that keeps new-upload sources fresh would
   // reject everything it finds.
   const archive = source.kind === 'yt_channel_top';
+  const threshold = source.min_view_count ?? 0;
+  const depth = archive
+    ? ARCHIVE_PAGE_SIZE
+    : threshold > 0
+      ? THRESHOLD_PAGE_SIZE
+      : 5;
   const videos = await listChannelVideos(
     source.handle,
-    archive ? ARCHIVE_PAGE_SIZE : 5,
+    depth,
     archive ? 'popular' : 'latest',
   );
   const cutoff = Date.now() - MAX_VIDEO_AGE_DAYS * 86400_000;
@@ -108,6 +125,10 @@ export async function ingestYouTubeChannel(
 
   for (const video of videos) {
     if (video.durationSeconds < MIN_VIDEO_SECONDS) continue;
+    // Skipped, not recorded: a video under the threshold today may pass
+    // tomorrow, and it only gets that second chance if nothing here has
+    // written it off.
+    if (threshold > 0 && (video.viewCount ?? 0) < threshold) continue;
     if (!archive && video.uploadedAt && new Date(video.uploadedAt).getTime() < cutoff) {
       continue;
     }

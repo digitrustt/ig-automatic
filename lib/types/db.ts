@@ -71,6 +71,8 @@ export interface Source {
   niche: string;
   enabled: boolean;
   poll_interval_minutes: number;
+  /** Skip videos below this view count; null takes everything. */
+  min_view_count: number | null;
   last_polled_at: string | null;
   created_at: string;
 }
