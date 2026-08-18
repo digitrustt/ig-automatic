@@ -10,6 +10,7 @@
     "worker": "tsx watch worker/index.ts",
     "worker:prod": "tsx worker/index.ts",
     "verify:render": "tsx scripts/verify-render.ts",
+    "account:add": "tsx scripts/add-account.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
