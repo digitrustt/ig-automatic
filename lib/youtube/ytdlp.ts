@@ -42,6 +42,8 @@ function challengeSolver(): string[] {
   return ['--remote-components', 'ejs:github'];
 }
 
+export type ChannelOrder = 'latest' | 'popular';
+
 export interface ChannelVideo {
   videoId: string;
   title: string;
@@ -68,15 +70,23 @@ interface FlatEntry {
 export async function listChannelVideos(
   handle: string,
   limit = 5,
+  order: ChannelOrder = 'latest',
 ): Promise<ChannelVideo[]> {
   const channel = handle.startsWith('@') ? handle : `@${handle}`;
+
+  // YouTube exposes the archive ranked by view count through the same tab,
+  // which turns years of uploads into a queue the audience already sorted.
+  const url =
+    order === 'popular'
+      ? `https://www.youtube.com/${channel}/videos?view=0&sort=p&flow=grid`
+      : `https://www.youtube.com/${channel}/videos`;
 
   const stdout = await run(ytdlpPath(), [
     '--flat-playlist',
     '--playlist-end', String(limit),
     '--print', '%(.{id,title,duration,view_count,upload_date,timestamp})j',
     '--no-warnings',
-    `https://www.youtube.com/${channel}/videos`,
+    url,
   ]);
 
   return stdout

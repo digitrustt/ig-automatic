@@ -6,7 +6,8 @@ export type SourceKind =
   | 'ig_hashtag_apify'
   | 'ig_account_apify'
   | 'tt_hashtag_apify'
-  | 'yt_channel';
+  | 'yt_channel'
+  | 'yt_channel_top';
 
 export type PostStatus =
   | 'discovered'

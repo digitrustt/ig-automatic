@@ -24,7 +24,7 @@ export async function dispatch(job: Job): Promise<unknown> {
       const source = data as Source;
       // YouTube channels take a different route: no scoring, straight to
       // clipping. See lib/ingest/youtube.ts for why.
-      return source.kind === 'yt_channel'
+      return source.kind === 'yt_channel' || source.kind === 'yt_channel_top'
         ? ingestYouTubeChannel(source)
         : ingestSource(source);
     }

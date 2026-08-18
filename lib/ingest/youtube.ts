@@ -33,6 +33,15 @@ const MAX_VIDEOS_PER_POLL = 1;
  */
 const MAX_UNPUBLISHED_CLIPS = 56;
 
+/**
+ * How deep into the ranked archive one poll looks.
+ *
+ * Videos already clipped are skipped, so the window has to reach past them to
+ * find the next unseen one — a handful would stall on the same top results
+ * forever.
+ */
+const ARCHIVE_PAGE_SIZE = 40;
+
 export interface YouTubeIngestResult {
   source: string;
   fetched: number;
@@ -41,14 +50,19 @@ export interface YouTubeIngestResult {
 }
 
 /**
- * Clips waiting for their slot. Every finished clip is scheduled straight
- * away, so this is the whole queue of work already done and not yet aired.
+ * Clips waiting for their slot in one niche. Every finished clip is scheduled
+ * straight away, so this is the queue of work already done and not yet aired.
+ *
+ * Counted per niche rather than across the board because each niche feeds its
+ * own account on its own daily schedule. A shared counter lets a well-supplied
+ * niche fill the quota and starve the others of new material indefinitely.
  */
-async function backlogSize(): Promise<number> {
+async function backlogSize(niche: string): Promise<number> {
   const { count, error } = await admin()
     .from('publications')
-    .select('id', { count: 'exact', head: true })
-    .eq('status', 'scheduled');
+    .select('id, renditions!inner(posts!inner(niche))', { count: 'exact', head: true })
+    .eq('status', 'scheduled')
+    .eq('renditions.posts.niche', niche);
   if (error) throw error;
   return count ?? 0;
 }
@@ -65,7 +79,7 @@ async function backlogSize(): Promise<number> {
 export async function ingestYouTubeChannel(
   source: Source,
 ): Promise<YouTubeIngestResult> {
-  const backlog = await backlogSize();
+  const backlog = await backlogSize(source.niche);
   if (backlog >= MAX_UNPUBLISHED_CLIPS) {
     await admin()
       .from('sources')
@@ -79,14 +93,24 @@ export async function ingestYouTubeChannel(
     };
   }
 
-  const videos = await listChannelVideos(source.handle, 5);
+  // An archive source works down the most-viewed uploads instead of the
+  // newest, so the age window that keeps new-upload sources fresh would
+  // reject everything it finds.
+  const archive = source.kind === 'yt_channel_top';
+  const videos = await listChannelVideos(
+    source.handle,
+    archive ? ARCHIVE_PAGE_SIZE : 5,
+    archive ? 'popular' : 'latest',
+  );
   const cutoff = Date.now() - MAX_VIDEO_AGE_DAYS * 86400_000;
 
   let queued = 0;
 
   for (const video of videos) {
     if (video.durationSeconds < MIN_VIDEO_SECONDS) continue;
-    if (video.uploadedAt && new Date(video.uploadedAt).getTime() < cutoff) continue;
+    if (!archive && video.uploadedAt && new Date(video.uploadedAt).getTime() < cutoff) {
+      continue;
+    }
 
     const { data, error } = await admin()
       .from('posts')
