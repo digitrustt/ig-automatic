@@ -72,7 +72,9 @@ export async function listChannelVideos(
   limit = 5,
   order: ChannelOrder = 'latest',
 ): Promise<ChannelVideo[]> {
-  const channel = handle.startsWith('@') ? handle : `@${handle}`;
+  // Polish handles carry diacritics — @DlaPieniędzy resolves only once the
+  // non-ASCII characters are percent-encoded.
+  const channel = `@${encodeURIComponent(handle.replace(/^@/, ''))}`;
 
   // YouTube exposes the archive ranked by view count through the same tab,
   // which turns years of uploads into a queue the audience already sorted.
