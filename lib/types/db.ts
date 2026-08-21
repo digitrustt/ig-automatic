@@ -7,7 +7,8 @@ export type SourceKind =
   | 'ig_account_apify'
   | 'tt_hashtag_apify'
   | 'yt_channel'
-  | 'yt_channel_top';
+  | 'yt_channel_top'
+  | 'yt_playlist';
 
 export type PostStatus =
   | 'discovered'
@@ -73,6 +74,8 @@ export interface Source {
   poll_interval_minutes: number;
   /** Skip videos below this view count; null takes everything. */
   min_view_count: number | null;
+  /** Spread this source's videos across these niches; null uses `niche`. */
+  niche_pool: string[] | null;
   last_polled_at: string | null;
   created_at: string;
 }

@@ -53,6 +53,20 @@ export interface ChannelVideo {
   url: string;
 }
 
+/**
+ * Lists a playlist the same way, metadata only.
+ *
+ * A playlist is somebody else's edit of a channel — a best-of, a themed run —
+ * and often the only place that material exists as a set. Ordering is theirs,
+ * not the audience's, so nothing is inferred from position here.
+ */
+export async function listPlaylistVideos(
+  playlistId: string,
+  limit = 50,
+): Promise<ChannelVideo[]> {
+  return listUrl(`https://www.youtube.com/playlist?list=${playlistId}`, limit);
+}
+
 /** yt-dlp's `--print` output, one JSON object per line. */
 interface FlatEntry {
   id: string;
@@ -83,6 +97,10 @@ export async function listChannelVideos(
       ? `https://www.youtube.com/${channel}/videos?view=0&sort=p&flow=grid`
       : `https://www.youtube.com/${channel}/videos`;
 
+  return listUrl(url, limit);
+}
+
+async function listUrl(url: string, limit: number): Promise<ChannelVideo[]> {
   const stdout = await run(ytdlpPath(), [
     '--flat-playlist',
     '--playlist-end', String(limit),

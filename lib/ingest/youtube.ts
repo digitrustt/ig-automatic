@@ -1,13 +1,23 @@
 import { enqueue } from '@/lib/queue';
 import { admin } from '@/lib/supabase/admin';
 import type { Source } from '@/lib/types/db';
-import { listChannelVideos } from '@/lib/youtube/ytdlp';
+import { listChannelVideos, listPlaylistVideos } from '@/lib/youtube/ytdlp';
 
 /** Ignore anything too short to yield a standalone clip. */
 const MIN_VIDEO_SECONDS = 180;
 
 /** How far back to pick up videos on the first poll of a channel. */
 const MAX_VIDEO_AGE_DAYS = 14;
+
+/**
+ * Refuse anything longer than this.
+ *
+ * Long-form is the point, so the ceiling is high enough for an interview or a
+ * podcast. What it keeps out is the ten-hour compilation: transcribing one
+ * costs a day's allowance, selection would run seventy prompt windows, and the
+ * result is material already cut from videos we could clip directly.
+ */
+const MAX_VIDEO_SECONDS = 2 * 3600;
 
 /**
  * Videos to start clipping per poll.
@@ -41,6 +51,9 @@ const MAX_UNPUBLISHED_CLIPS = 56;
  * forever.
  */
 const ARCHIVE_PAGE_SIZE = 40;
+
+/** How much of a playlist one poll considers. */
+const PLAYLIST_PAGE_SIZE = 200;
 
 /**
  * How many recent uploads a threshold source looks at.
@@ -104,32 +117,39 @@ export async function ingestYouTubeChannel(
     };
   }
 
-  // An archive source works down the most-viewed uploads instead of the
-  // newest, so the age window that keeps new-upload sources fresh would
-  // reject everything it finds.
+  // Archives and playlists are both back catalogues: they are ordered by
+  // something other than recency, so the age window that keeps new-upload
+  // sources fresh would reject everything they find.
   const archive = source.kind === 'yt_channel_top';
+  const playlist = source.kind === 'yt_playlist';
+  const backCatalogue = archive || playlist;
   const threshold = source.min_view_count ?? 0;
-  const depth = archive
-    ? ARCHIVE_PAGE_SIZE
-    : threshold > 0
-      ? THRESHOLD_PAGE_SIZE
-      : 5;
-  const videos = await listChannelVideos(
-    source.handle,
-    depth,
-    archive ? 'popular' : 'latest',
-  );
+
+  const videos = playlist
+    ? await listPlaylistVideos(source.handle, PLAYLIST_PAGE_SIZE)
+    : await listChannelVideos(
+        source.handle,
+        archive ? ARCHIVE_PAGE_SIZE : threshold > 0 ? THRESHOLD_PAGE_SIZE : 5,
+        archive ? 'popular' : 'latest',
+      );
+
   const cutoff = Date.now() - MAX_VIDEO_AGE_DAYS * 86400_000;
+
+  // A back catalogue has no natural order to work through, and taking it from
+  // the top would publish it in the order somebody else happened to arrange
+  // it — and stall on the same videos whenever the queue is full.
+  const candidates = backCatalogue ? shuffle(videos) : videos;
 
   let queued = 0;
 
-  for (const video of videos) {
+  for (const video of candidates) {
     if (video.durationSeconds < MIN_VIDEO_SECONDS) continue;
+    if (video.durationSeconds > MAX_VIDEO_SECONDS) continue;
     // Skipped, not recorded: a video under the threshold today may pass
     // tomorrow, and it only gets that second chance if nothing here has
     // written it off.
     if (threshold > 0 && (video.viewCount ?? 0) < threshold) continue;
-    if (!archive && video.uploadedAt && new Date(video.uploadedAt).getTime() < cutoff) {
+    if (!backCatalogue && video.uploadedAt && new Date(video.uploadedAt).getTime() < cutoff) {
       continue;
     }
 
@@ -140,7 +160,7 @@ export async function ingestYouTubeChannel(
           platform: 'youtube',
           external_id: video.videoId,
           source_id: source.id,
-          niche: source.niche,
+          niche: nicheFor(video.videoId, source),
           author_handle: source.handle.replace(/^@/, ''),
           permalink: video.url,
           media_type: 'YOUTUBE',
@@ -177,5 +197,39 @@ export async function ingestYouTubeChannel(
     .update({ last_polled_at: new Date().toISOString() })
     .eq('id', source.id);
 
-  return { source: `yt_channel:${source.handle}`, fetched: videos.length, queued };
+  return { source: `${source.kind}:${source.handle}`, fetched: videos.length, queued };
+}
+
+/**
+ * Picks which account's niche a video belongs to.
+ *
+ * A source can feed several accounts, and spreading its videos between them
+ * keeps any one of them from reading as a single channel's rip. The choice is
+ * derived from the video id rather than drawn at random: a poll re-reads
+ * videos it has already stored, and a fresh draw each time would move a video
+ * to another account after its clips were scheduled for this one.
+ *
+ * Whole videos move, never individual clips — two accounts posting different
+ * cuts of the same conversation on the same day looks exactly like what it is.
+ */
+function nicheFor(videoId: string, source: Source): string {
+  const pool = source.niche_pool ?? [];
+  if (pool.length === 0) return source.niche;
+
+  let hash = 2166136261;
+  for (let i = 0; i < videoId.length; i++) {
+    hash ^= videoId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return pool[Math.abs(hash) % pool.length];
+}
+
+function shuffle<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }

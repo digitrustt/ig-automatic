@@ -33,3 +33,26 @@ alter table public.sources add column if not exists min_view_count integer;
 
 comment on column public.sources.min_view_count is
   'Skip videos below this view count; null takes everything.';
+
+-- A playlist is somebody else's edit of a channel — a best-of, a themed run —
+-- and is often the only place that material exists as a set. Same pipeline as a
+-- channel; only the listing URL differs.
+alter table public.sources drop constraint sources_kind_check;
+alter table public.sources add constraint sources_kind_check check (kind in (
+  'ig_hashtag_graph',
+  'ig_account_graph',
+  'ig_hashtag_apify',
+  'ig_account_apify',
+  'tt_hashtag_apify',
+  'yt_channel',
+  'yt_channel_top',
+  'yt_playlist'
+));
+
+-- One source can feed several accounts. Spreading a back catalogue between
+-- them keeps any one account from reading as a single channel's rip, and makes
+-- a finite pile of material last proportionally longer on each.
+alter table public.sources add column if not exists niche_pool text[];
+
+comment on column public.sources.niche_pool is
+  'Spread this source''s videos across these niches; null publishes to niche.';
