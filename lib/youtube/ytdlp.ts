@@ -67,6 +67,18 @@ export async function listPlaylistVideos(
   return listUrl(`https://www.youtube.com/playlist?list=${playlistId}`, limit);
 }
 
+/**
+ * Reads one video's metadata.
+ *
+ * The URL is rebuilt from the id rather than used as pasted: a YouTube link
+ * copied from the app carries the playlist it was playing inside, and yt-dlp
+ * would happily walk all of it.
+ */
+export async function describeVideo(videoId: string): Promise<ChannelVideo | null> {
+  const [video] = await listUrl(`https://www.youtube.com/watch?v=${videoId}`, 1);
+  return video ?? null;
+}
+
 /** yt-dlp's `--print` output, one JSON object per line. */
 interface FlatEntry {
   id: string;

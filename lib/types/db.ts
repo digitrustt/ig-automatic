@@ -8,7 +8,8 @@ export type SourceKind =
   | 'tt_hashtag_apify'
   | 'yt_channel'
   | 'yt_channel_top'
-  | 'yt_playlist';
+  | 'yt_playlist'
+  | 'yt_video';
 
 export type PostStatus =
   | 'discovered'

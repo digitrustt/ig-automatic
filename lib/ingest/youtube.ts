@@ -1,7 +1,7 @@
 import { enqueue } from '@/lib/queue';
 import { admin } from '@/lib/supabase/admin';
 import type { Source } from '@/lib/types/db';
-import { listChannelVideos, listPlaylistVideos } from '@/lib/youtube/ytdlp';
+import { describeVideo, listChannelVideos, listPlaylistVideos } from '@/lib/youtube/ytdlp';
 
 /** Ignore anything too short to yield a standalone clip. */
 const MIN_VIDEO_SECONDS = 180;
@@ -122,10 +122,13 @@ export async function ingestYouTubeChannel(
   // sources fresh would reject everything they find.
   const archive = source.kind === 'yt_channel_top';
   const playlist = source.kind === 'yt_playlist';
-  const backCatalogue = archive || playlist;
+  const single = source.kind === 'yt_video';
+  const backCatalogue = archive || playlist || single;
   const threshold = source.min_view_count ?? 0;
 
-  const videos = playlist
+  const videos = single
+    ? [await describeVideo(source.handle)].filter((v) => v !== null)
+    : playlist
     ? await listPlaylistVideos(source.handle, PLAYLIST_PAGE_SIZE)
     : await listChannelVideos(
         source.handle,
