@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { ffmpeg } from '@/lib/media/ffmpeg';
+import { ffmpeg, probe } from '@/lib/media/ffmpeg';
 
 export interface Word {
   word: string;
@@ -18,6 +18,16 @@ export interface Transcript {
 
 /** Groq's upload ceiling for the free tier. */
 const MAX_UPLOAD_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Seconds of audio per upload when a video has to be split.
+ *
+ * At 48kbps an hour of speech is about 21MB, which clears the upload ceiling
+ * with room to spare. Interviews and podcasts routinely run two hours, so
+ * without splitting the pipeline would be capped at roughly seventy minutes and
+ * would reject exactly the long-form material it exists to clip.
+ */
+const CHUNK_SECONDS = 3600;
 
 /**
  * Speech is intelligible far below music-grade audio, and the API charges by
@@ -52,17 +62,69 @@ export async function transcribe(
   audioPath: string,
   language = 'pl',
 ): Promise<Transcript> {
+  const { size } = await stat(audioPath);
+  if (size <= MAX_UPLOAD_BYTES) return transcribeFile(audioPath, language);
+
+  const parts = await splitAudio(audioPath);
+  const merged: Transcript = {
+    language,
+    durationSeconds: 0,
+    text: '',
+    words: [],
+  };
+
+  // Each part is transcribed against its own clock, so every timestamp has to
+  // be shifted by how much audio came before it. Measuring the parts rather
+  // than assuming CHUNK_SECONDS keeps the drift out: the splitter cuts on
+  // frame boundaries, not exactly where it was asked to.
+  let offset = 0;
+  for (const part of parts) {
+    const piece = await transcribeFile(part, language);
+    merged.language = piece.language;
+    merged.text += (merged.text ? ' ' : '') + piece.text;
+    for (const w of piece.words) {
+      merged.words.push({ word: w.word, start: w.start + offset, end: w.end + offset });
+    }
+    offset += (await probe(part)).durationSeconds;
+  }
+
+  merged.durationSeconds = offset;
+  return merged;
+}
+
+/**
+ * Cuts the audio into upload-sized pieces.
+ *
+ * Stream copy rather than a re-encode: the file is already the low-bitrate mono
+ * mix we made for transcription, and re-encoding it would cost minutes on a
+ * long video for no gain in what the model hears.
+ */
+async function splitAudio(audioPath: string): Promise<string[]> {
+  const dir = path.dirname(audioPath);
+  const prefix = 'part-';
+
+  await ffmpeg([
+    '-y',
+    '-i', audioPath,
+    '-f', 'segment',
+    '-segment_time', String(CHUNK_SECONDS),
+    '-c', 'copy',
+    path.join(dir, `${prefix}%03d.mp3`),
+  ]);
+
+  const files = (await readdir(dir))
+    .filter((f) => f.startsWith(prefix))
+    .sort();
+
+  return files.map((f) => path.join(dir, f));
+}
+
+async function transcribeFile(
+  audioPath: string,
+  language: string,
+): Promise<Transcript> {
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) throw new Error('LLM_API_KEY is not set');
-
-  const { size } = await stat(audioPath);
-  if (size > MAX_UPLOAD_BYTES) {
-    throw new Error(
-      `Audio is ${(size / 1024 / 1024).toFixed(1)}MB, over the ${
-        MAX_UPLOAD_BYTES / 1024 / 1024
-      }MB upload limit`,
-    );
-  }
 
   const baseUrl = process.env.LLM_BASE_URL || 'https://api.groq.com/openai/v1';
   const model = process.env.WHISPER_MODEL || 'whisper-large-v3-turbo';
