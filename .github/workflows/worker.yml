@@ -4,14 +4,14 @@ name: worker
 # rather than idling — there is no server to keep alive.
 on:
   schedule:
-    # Every two hours. On a private repository Actions bills by the minute
-    # against a 2000/month allowance and clipping runs are long, so this
-    # cadence leaves headroom. Tracked channels publish a few times a week,
-    # so polling faster would buy very little.
+    # Every half hour. Polling for new videos would be fine far slower —
+    # tracked channels publish a few times a week — but publishing is what
+    # sets this: slots are two hours apart, so a two-hourly worker could miss
+    # one by almost its whole width and reschedule a post that was ready.
     #
-    # Make the repository public and this can drop to '*/30 * * * *': public
-    # repositories get unmetered minutes.
-    - cron: '0 */2 * * *'
+    # Affordable because the repository is public, and public repositories get
+    # unmetered Actions minutes.
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 # A second run starting mid-render would fight the first over the same jobs.
