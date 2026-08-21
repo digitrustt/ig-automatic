@@ -35,6 +35,17 @@ const BAND_COLOR = '0x111111';
  * below lands around 37MB, which leaves comfortable headroom.
  */
 const MAX_DURATION_SECONDS = 60;
+
+/**
+ * Length of the fade at each end of a clip.
+ *
+ * A cut lifted out of the middle of a video starts and ends abruptly however
+ * carefully the boundary was chosen, and the hard cut is what reads as ripped
+ * rather than edited. Short enough not to eat the first word, long enough to
+ * register.
+ */
+const FADE_IN = 0.2;
+const FADE_OUT = 0.3;
 const MAX_VIDEO_BITRATE = '5M';
 const RATE_BUFFER = '10M';
 
@@ -108,6 +119,14 @@ export async function remix(
   const output = path.join(dir, 'remix.mp4');
   const font = fontPath(opts.fontPath);
 
+  // The fade-out has to be placed against the clip's real length, which is
+  // whichever runs out first: the footage or the duration cap.
+  const duration = Math.min(
+    info.durationSeconds,
+    opts.maxDurationSeconds ?? MAX_DURATION_SECONDS,
+  );
+  const fades = duration > (FADE_IN + FADE_OUT) * 2;
+
   const hookFile = path.join(dir, 'hook.txt');
   const brandFile = path.join(dir, 'brand.txt');
   await writeFile(hookFile, wrapText(opts.hookText, 26), 'utf8');
@@ -143,6 +162,13 @@ export async function remix(
     // Burned-in captions, last so they sit above everything. Spoken-word
     // clips lose most of their audience to muted autoplay without them.
     opts.captionFile ? `subtitles='${escapeFilterPath(opts.captionFile)}'` : null,
+    // Last, so the whole composed frame fades rather than the video alone
+    // sliding out from under a title that stays put. Skipped on a clip too
+    // short to hold both fades, where they would meet in the middle.
+    ...(fades ? [
+      `fade=t=in:st=0:d=${FADE_IN}`,
+      `fade=t=out:st=${(duration - FADE_OUT).toFixed(2)}:d=${FADE_OUT}`,
+    ] : []),
   ]
     .filter(Boolean)
     .join(',');
@@ -169,6 +195,16 @@ export async function remix(
     '-bufsize', RATE_BUFFER,
     '-pix_fmt', 'yuv420p',
     '-movflags', '+faststart',
+  );
+
+  if (fades) {
+    args.push(
+      '-af',
+      `afade=t=in:st=0:d=${FADE_IN},afade=t=out:st=${(duration - FADE_OUT).toFixed(2)}:d=${FADE_OUT}`,
+    );
+  }
+
+  args.push(
     '-c:a', 'aac',
     '-b:a', '128k',
     '-ar', '44100',

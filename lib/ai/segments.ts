@@ -19,6 +19,28 @@ const MAX_SEGMENT_SECONDS = 60;
 /** Seconds of transcript per prompt line — enough context, few enough tokens. */
 const LINE_SECONDS = 8;
 
+/**
+ * How far a boundary may move to land on speech instead of inside it.
+ *
+ * The model picks moments by reading a transcript, so its numbers point at
+ * roughly the right line rather than at the silence around it — which is how a
+ * clip ends up opening on the back half of a word. Starts get less room than
+ * ends: pulling a start earlier risks including the end of the previous
+ * thought, while letting an end run on usually just finishes the sentence.
+ */
+const MAX_START_SHIFT = 2.5;
+const MAX_END_EXTEND = 6;
+
+/** A gap this long reads as a break between thoughts rather than a breath. */
+const PAUSE_SECONDS = 0.32;
+
+/** Breathing room so the first word is not clipped by the cut itself. */
+const LEAD_IN = 0.15;
+const TAIL = 0.35;
+
+/** Whisper leaves punctuation attached to the word it follows. */
+const SENTENCE_END = /[.!?…]["')\]]?$/;
+
 const SYSTEM = `You select clips from a long video transcript for a vertical
 short-form feed.
 
@@ -149,7 +171,82 @@ export async function selectSegments(opts: SelectOptions): Promise<Segment[]> {
     all.push(...segments);
   }
 
-  return sanitize(all, transcript.durationSeconds, maxSegments);
+  return sanitize(all, transcript.durationSeconds, maxSegments, transcript.words);
+}
+
+/**
+ * Moves a segment's edges onto the boundaries of actual speech.
+ *
+ * Three things can mark a boundary, in descending order of how clean the cut
+ * sounds: the end of a sentence, a pause long enough to read as one, and — as
+ * a last resort — the edge of the nearest word, which at least avoids cutting
+ * a syllable in half.
+ */
+export function snapToSpeech(segment: Segment, words: Word[]): Segment {
+  if (words.length === 0) return segment;
+
+  const start = snapStart(segment.start, words);
+  const end = snapEnd(segment.end, words, start);
+
+  return { ...segment, start, end };
+}
+
+function snapStart(target: number, words: Word[]): number {
+  const from = target - MAX_START_SHIFT;
+  const to = target + MAX_START_SHIFT;
+
+  let best: number | null = null;
+  let bestRank = -1;
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w.start < from) continue;
+    if (w.start > to) break;
+
+    const previous = words[i - 1];
+    // A word is a good opening if a sentence ended just before it.
+    const afterSentence = !previous || SENTENCE_END.test(previous.word);
+    const afterPause = previous ? w.start - previous.end >= PAUSE_SECONDS : true;
+    const rank = afterSentence ? 2 : afterPause ? 1 : 0;
+
+    // Among equally good boundaries take the closest, so a clip does not drift
+    // away from the moment the model actually chose.
+    if (rank > bestRank || (rank === bestRank && best !== null &&
+        Math.abs(w.start - target) < Math.abs(best - target))) {
+      best = w.start;
+      bestRank = rank;
+    }
+  }
+
+  return Math.max(0, (best ?? target) - LEAD_IN);
+}
+
+function snapEnd(target: number, words: Word[], start: number): number {
+  const hardStop = start + MAX_SEGMENT_SECONDS;
+  const from = target - MAX_START_SHIFT;
+  const to = Math.min(target + MAX_END_EXTEND, hardStop);
+
+  let best: number | null = null;
+  let bestRank = -1;
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w.end < from) continue;
+    if (w.end > to) break;
+
+    const next = words[i + 1];
+    const endsSentence = SENTENCE_END.test(w.word);
+    const beforePause = next ? next.start - w.end >= PAUSE_SECONDS : true;
+    const rank = endsSentence ? 2 : beforePause ? 1 : 0;
+
+    if (rank > bestRank || (rank === bestRank && best !== null &&
+        Math.abs(w.end - target) < Math.abs(best - target))) {
+      best = w.end;
+      bestRank = rank;
+    }
+  }
+
+  return Math.min((best ?? target) + TAIL, hardStop);
 }
 
 function splitWindows(duration: number): Array<{ from: number; to: number }> {
@@ -237,6 +334,7 @@ export function sanitize(
   segments: Segment[],
   durationSeconds: number,
   maxSegments: number,
+  words: Word[] = [],
 ): Segment[] {
   const cleaned = segments
     .map((s) => ({
@@ -250,7 +348,11 @@ export function sanitize(
     // A keyword list gets this backwards: real sponsor reads avoid the word
     // "advert", while genuine reporting about an ad deal is full of it.
     .filter((s) => !s.sponsor)
-    .filter((s) => s.end - s.start >= MIN_SEGMENT_SECONDS && s.hook.length > 0)
+    .filter((s) => s.hook.length > 0)
+    // Snapped before the length checks: moving an edge onto a sentence
+    // boundary changes the duration, sometimes by seconds.
+    .map((s) => snapToSpeech(s, words))
+    .filter((s) => s.end - s.start >= MIN_SEGMENT_SECONDS)
     .map((s) => ({
       ...s,
       end: Math.min(s.end, s.start + MAX_SEGMENT_SECONDS),
