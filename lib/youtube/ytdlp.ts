@@ -42,6 +42,21 @@ function challengeSolver(): string[] {
   return ['--remote-components', 'ejs:github'];
 }
 
+/**
+ * Asks YouTube for titles in the channel's own language.
+ *
+ * YouTube auto-translates titles to match where the request comes from, and CI
+ * runners are American — so a Polish channel came back as "KARO AND ERYK'S
+ * PICNIC!" instead of "PIKNIK KARO I ERYKA!". That title is what the selection
+ * prompt is told the video is about, and what gets stored as the post's
+ * caption, so the translation was quietly degrading both.
+ *
+ * There is no code for "leave it alone"; naming the language is the way to ask.
+ */
+function preferredLanguage(): string[] {
+  return ['--extractor-args', `youtube:lang=${process.env.YTDLP_LANG || 'pl'}`];
+}
+
 export type ChannelOrder = 'latest' | 'popular';
 
 export interface ChannelVideo {
@@ -114,6 +129,7 @@ export async function listChannelVideos(
 
 async function listUrl(url: string, limit: number): Promise<ChannelVideo[]> {
   const stdout = await run(ytdlpPath(), [
+    ...preferredLanguage(),
     '--flat-playlist',
     '--playlist-end', String(limit),
     '--print', '%(.{id,title,duration,view_count,upload_date,timestamp})j',
