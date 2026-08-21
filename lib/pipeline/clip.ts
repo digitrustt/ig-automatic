@@ -141,8 +141,9 @@ async function renderClip(
 
   // Checked here rather than at publish time: the guard's whole job is to
   // stop the text before it is burned into pixels, after which it can only
-  // be fixed by re-rendering.
-  const guard = checkOnScreenText(hookText);
+  // be fixed by re-rendering. What counts as unacceptable depends on the
+  // account — see lib/ai/guard.ts.
+  const guard = checkOnScreenText(hookText, account.niche);
   if (!guard.ok) {
     throw new Error(`Hook rejected (${guard.reason}): ${hookText.slice(0, 80)}`);
   }
