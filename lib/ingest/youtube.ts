@@ -34,14 +34,18 @@ const MAX_VIDEOS_PER_POLL = 1;
  * Stop clipping once this many finished clips are waiting to go out.
  *
  * Supply and demand are wildly mismatched here: one video yields several
- * clips, a handful of tracked channels publish daily, and the account posts a
- * few times a day. Without a brake the pipeline would render clips by the
- * hundred for a handful published — burning the transcription allowance, the
- * storage quota and the CI minutes on work that expires before it airs.
+ * clips, a dozen tracked sources publish daily, and an account posts eight
+ * times a day. Without a brake the pipeline renders clips by the hundred for a
+ * handful published — burning the transcription allowance, the storage quota
+ * and the CI minutes on work that expires before it airs.
  *
- * Roughly a week of posting, so a channel going quiet never starves the queue.
+ * Three days deep, deliberately shallow. A clip scheduled a week out was cut
+ * from a video that was current when it was made and will not be when it airs,
+ * which matters most on exactly the sources worth having. Shallow also means
+ * the queue reflects a recent decision: change a source or a setting and it
+ * shows up in days rather than after the backlog drains.
  */
-const MAX_UNPUBLISHED_CLIPS = 56;
+const MAX_UNPUBLISHED_CLIPS = 24;
 
 /**
  * How deep into the ranked archive one poll looks.
@@ -82,13 +86,17 @@ export interface YouTubeIngestResult {
  * niche fill the quota and starve the others of new material indefinitely.
  */
 async function backlogSize(niche: string): Promise<number> {
-  const { count, error } = await admin()
+  // Counted as clips, not as publications. Every clip goes to Instagram and to
+  // a Facebook Page, so counting rows made the queue look twice as deep as it
+  // was and the brake bite at half the intended backlog.
+  const { data, error } = await admin()
     .from('publications')
-    .select('id, renditions!inner(posts!inner(niche))', { count: 'exact', head: true })
+    .select('rendition_id, renditions!inner(posts!inner(niche))')
     .eq('status', 'scheduled')
     .eq('renditions.posts.niche', niche);
   if (error) throw error;
-  return count ?? 0;
+
+  return new Set((data ?? []).map((r) => (r as { rendition_id: string }).rendition_id)).size;
 }
 
 /**
