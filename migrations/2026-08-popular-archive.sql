@@ -56,3 +56,12 @@ alter table public.sources add column if not exists niche_pool text[];
 
 comment on column public.sources.niche_pool is
   'Spread this source''s videos across these niches; null publishes to niche.';
+
+-- How many clips to take from one video, per source. This is the pacing dial
+-- for a back catalogue: a hundred-video playlist yielding two clips each lasts
+-- months, and the same playlist yielding six is spent before the account has
+-- found its audience.
+alter table public.sources add column if not exists max_clips_per_video integer;
+
+comment on column public.sources.max_clips_per_video is
+  'Clips taken from one video; null uses MAX_CLIPS_PER_VIDEO.';

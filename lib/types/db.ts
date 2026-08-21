@@ -76,6 +76,8 @@ export interface Source {
   min_view_count: number | null;
   /** Spread this source's videos across these niches; null uses `niche`. */
   niche_pool: string[] | null;
+  /** Clips to take from one of this source's videos; null uses the default. */
+  max_clips_per_video: number | null;
   last_polled_at: string | null;
   created_at: string;
 }

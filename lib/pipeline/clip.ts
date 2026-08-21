@@ -1,4 +1,5 @@
 import { generateCopy } from '@/lib/ai/copy';
+import { findDuplicate } from '@/lib/ai/dedupe';
 import { checkOnScreenText } from '@/lib/ai/guard';
 import { selectSegments, type Segment } from '@/lib/ai/segments';
 import { extractAudio, transcribe, windowText, type Transcript } from '@/lib/ai/transcribe';
@@ -26,6 +27,38 @@ export interface ClipResult {
  * that survive selection are downloaded as video. On a 45-minute upload that is
  * the difference between moving a gigabyte and moving a few dozen megabytes.
  */
+/**
+ * How many clips to take from one video.
+ *
+ * Set per source, because it is the pacing dial for a back catalogue: a
+ * hundred-video playlist yielding two clips each lasts months, and the same
+ * playlist yielding six is spent before the account finds its audience.
+ */
+/** Every clip already cut, to compare a new one against. */
+async function publishedTranscripts(): Promise<
+  Array<{ id: string; transcript: string | null }>
+> {
+  const { data, error } = await admin()
+    .from('renditions')
+    .select('id, transcript')
+    .not('transcript', 'is', null);
+  if (error) throw error;
+  return data as Array<{ id: string; transcript: string | null }>;
+}
+
+async function clipsPerVideo(sourceId: string | null): Promise<number> {
+  const fallback = Number(process.env.MAX_CLIPS_PER_VIDEO || 6);
+  if (!sourceId) return fallback;
+
+  const { data } = await admin()
+    .from('sources')
+    .select('max_clips_per_video')
+    .eq('id', sourceId)
+    .single();
+
+  return (data as { max_clips_per_video: number | null } | null)?.max_clips_per_video ?? fallback;
+}
+
 export async function clipVideo(postId: string): Promise<ClipResult> {
   const { data: post, error } = await admin()
     .from('posts')
@@ -49,7 +82,7 @@ export async function clipVideo(postId: string): Promise<ClipResult> {
       const segments = await selectSegments({
         transcript,
         title: p.caption ?? undefined,
-        maxSegments: Number(process.env.MAX_CLIPS_PER_VIDEO || 6),
+        maxSegments: await clipsPerVideo(p.source_id),
       });
 
       if (segments.length === 0) {
@@ -63,8 +96,7 @@ export async function clipVideo(postId: string): Promise<ClipResult> {
       let made = 0;
       for (const segment of segments) {
         try {
-          await renderClip(p, account, transcript, segment, dir, made);
-          made++;
+          if (await renderClip(p, account, transcript, segment, dir, made)) made++;
         } catch (err) {
           // One bad span should not cost the whole video; the rest still ship.
           console.warn(
@@ -112,7 +144,7 @@ async function renderClip(
   segment: Segment,
   dir: string,
   index: number,
-): Promise<void> {
+): Promise<boolean> {
   const source = await downloadSection({
     url: post.media_url!,
     dir,
@@ -134,6 +166,23 @@ async function renderClip(
     brandHandle: `@${account.handle}`,
     recentHooks: await recentHooks(account.id),
   });
+
+  // The same call turns up in several people's best-of playlists, so the same
+  // material reaches us as different videos with different ids. Checked before
+  // rendering, which is the expensive step.
+  const duplicate = findDuplicate(spoken, await publishedTranscripts());
+  if (duplicate) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        message: 'clip skipped as duplicate',
+        postId: post.id,
+        start: segment.start,
+        duplicateOf: duplicate,
+      }),
+    );
+    return false;
+  }
 
   // The segment's own hook is written against the clip's content; the copy
   // generator only sees a transcript window, so prefer the former.
@@ -186,4 +235,6 @@ async function renderClip(
       { dedupeKey: `publish:${rendition.id}:${target.id}` },
     );
   }
+
+  return true;
 }
