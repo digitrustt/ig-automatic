@@ -27,7 +27,7 @@ const OUT_H = 1920;
  * readable. A band cannot collide with anything, whatever the source looks
  * like, and it doubles as consistent branding across the feed.
  */
-const BAND_H = 320;
+const BAND_H = 440;
 const VIDEO_H = OUT_H - BAND_H;
 const BAND_COLOR = '0x111111';
 
@@ -41,13 +41,20 @@ const MAX_DURATION_SECONDS = 90;
 /**
  * Sponsor logo geometry.
  *
- * Clipping campaigns pay for the mark being visible and legible, so it sits in
- * the video area rather than the band — the band is ours and reads as our
- * furniture, which is exactly what a viewer's eye learns to skip. Bottom right
- * clears the captions, which are centred and sit lower.
+ * Campaigns require the mark at the top of the reel and visible for its whole
+ * length, which is exactly what the band already is — so the logo goes inside
+ * it, above the hook, and the band grew to make room.
+ *
+ * The supplied asset is a 1280x720 sheet with the logo floating in white
+ * space. CROP is that artwork's measured bounding box; without it the padding
+ * would dominate and the mark itself would render too small to read. The white
+ * is keyed out so the logo sits on the band instead of inside a white slab.
  */
-const LOGO_H = 96;
-const LOGO_MARGIN = 44;
+const LOGO_CROP = '980:412:150:221';
+const LOGO_H = 168;
+const LOGO_TOP = 18;
+/** Breathing room between the sponsor mark and our hook. */
+const LOGO_GAP = 20;
 
 /**
  * Length of the fade at each end of a clip.
@@ -164,7 +171,8 @@ export async function remix(
       'fontsize=54',
       'line_spacing=10',
       'x=(w-text_w)/2',
-      `y=(${BAND_H}-text_h)/2`,
+      // Centred in what the logo leaves, not in the whole band.
+      `y=${LOGO_TOP + LOGO_H + LOGO_GAP}+((${BAND_H}-46)-${LOGO_TOP + LOGO_H + LOGO_GAP}-text_h)/2`,
     ].join(':'),
     // Handle mark, bottom of the band so it never covers the video.
     [
@@ -211,8 +219,9 @@ export async function remix(
       '-filter_complex',
       [
         `[0:v]${filters}[base]`,
-        `[${logoInput}:v]scale=-1:${LOGO_H}[logo]`,
-        `[base][logo]overlay=W-w-${LOGO_MARGIN}:H-h-${LOGO_MARGIN}` +
+        `[${logoInput}:v]crop=${LOGO_CROP},scale=-1:${LOGO_H},` +
+          'colorkey=0xFFFFFF:0.25:0.05[logo]',
+        `[base][logo]overlay=(W-w)/2:${LOGO_TOP}` +
           (fadeChain ? `,${fadeChain}` : '') +
           '[v]',
       ].join(';'),

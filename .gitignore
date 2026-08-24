@@ -10,3 +10,4 @@ build
 *.tsbuildinfo
 next-env.d.ts
 /media-tmp
+verify-frame.png

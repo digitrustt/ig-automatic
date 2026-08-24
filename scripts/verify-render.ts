@@ -43,6 +43,11 @@ async function main(): Promise<void> {
       // escaping rule in one string.
       hookText: "Zaczynałem od 40kg — dziś 120kg: zobacz jak to zrobił",
       brandHandle: '@mojekonto',
+      // Campaign logos are burned in, so the overlay path has to be exercised
+      // too — it moves the whole chain into filter_complex.
+      logoPath: process.env.CAMPAIGN_LOGO
+        ? path.resolve(process.cwd(), process.env.CAMPAIGN_LOGO)
+        : undefined,
     });
 
     const { size } = await stat(outputPath);
@@ -65,6 +70,12 @@ async function main(): Promise<void> {
       console.error('\nFAILED:', problems.join(', '));
       process.exit(1);
     }
+
+    // A frame kept for eyeballing: layout bugs — a hook overlapping the logo,
+    // a mark keyed to the wrong colour — are invisible in the checks above.
+    const frame = path.join(process.cwd(), 'verify-frame.png');
+    await ffmpeg(['-y', '-i', outputPath, '-ss', '2', '-vframes', '1', frame]);
+    console.log('frame   ', frame);
 
     console.log('\nOK — remix pipeline works end to end');
   });

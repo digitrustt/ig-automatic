@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { generateCopy } from '@/lib/ai/copy';
 import { findDuplicate } from '@/lib/ai/dedupe';
 import { checkOnScreenText } from '@/lib/ai/guard';
@@ -34,6 +35,28 @@ export interface ClipResult {
  * hundred-video playlist yielding two clips each lasts months, and the same
  * playlist yielding six is spent before the account finds its audience.
  */
+/**
+ * The sponsor mark to burn in, if a campaign is running.
+ *
+ * Repo-relative so the file travels with the code and CI needs no extra
+ * secret. Unset means no campaign and the render is unchanged.
+ */
+function campaignLogo(): string | undefined {
+  const file = process.env.CAMPAIGN_LOGO;
+  return file ? path.resolve(process.cwd(), file) : undefined;
+}
+
+/**
+ * Campaigns pay only for clips that credit them, and the credit has to survive
+ * whatever the copy generator produced — so it is appended here rather than
+ * asked for in the prompt, where the model would sometimes drop it.
+ */
+function withCampaignMention(caption: string): string {
+  const mention = process.env.CAMPAIGN_MENTION;
+  if (!mention || caption.includes(mention)) return caption;
+  return `${caption}\n\n${mention}`;
+}
+
 /** Every clip already cut, to compare a new one against. */
 async function publishedTranscripts(): Promise<
   Array<{ id: string; transcript: string | null }>
@@ -201,6 +224,7 @@ async function renderClip(
     hookText,
     brandHandle: `@${account.handle}`,
     captionFile,
+    logoPath: campaignLogo(),
     maxDurationSeconds: segment.end - segment.start,
   });
 
@@ -214,7 +238,7 @@ async function renderClip(
       storage_path: upload.storagePath,
       public_url: upload.publicUrl,
       hook_text: hookText,
-      caption: copy.caption,
+      caption: withCampaignMention(copy.caption),
       hashtags: copy.hashtags,
       duration_seconds: info.durationSeconds,
       start_seconds: segment.start,

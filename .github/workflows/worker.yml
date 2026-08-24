@@ -95,6 +95,10 @@ jobs:
           TRANSCRIBE_LANGUAGE: ${{ vars.TRANSCRIBE_LANGUAGE || 'pl' }}
 
           POSTING_HOURS: ${{ vars.POSTING_HOURS || '11,17,20' }}
+          # Clipping campaign: the sponsor mark burned into every clip and the
+          # credit the campaign requires. Clear both variables to stop running it.
+          CAMPAIGN_LOGO: ${{ vars.CAMPAIGN_LOGO }}
+          CAMPAIGN_MENTION: ${{ vars.CAMPAIGN_MENTION }}
           # drawtext needs the file, libass needs the family name.
           FONT_PATH: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
           CAPTION_FONT: DejaVu Sans
