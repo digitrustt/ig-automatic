@@ -70,6 +70,25 @@ const PLAYLIST_PAGE_SIZE = 200;
  */
 const THRESHOLD_PAGE_SIZE = 25;
 
+/**
+ * The backlog a source is allowed to add to.
+ *
+ * The general brake exists to stop a source rendering without limit, and a
+ * source that states its own clips-per-video is already limited — by that
+ * number and by how often it is polled. Left under the general brake such a
+ * source never runs at all: the busy channels fill the niche first and it
+ * spends every poll being told the queue is full, which is exactly backwards,
+ * because it is the one whose output was deliberately rationed.
+ *
+ * Still bounded, at twice the general depth, so a misconfigured pacing setting
+ * cannot quietly become an unbounded one.
+ */
+function brakeFor(source: Source): number {
+  return source.max_clips_per_video
+    ? MAX_UNPUBLISHED_CLIPS * 2
+    : MAX_UNPUBLISHED_CLIPS;
+}
+
 export interface YouTubeIngestResult {
   source: string;
   fetched: number;
@@ -112,7 +131,7 @@ export async function ingestYouTubeChannel(
   source: Source,
 ): Promise<YouTubeIngestResult> {
   const backlog = await backlogSize(source.niche);
-  if (backlog >= MAX_UNPUBLISHED_CLIPS) {
+  if (backlog >= brakeFor(source)) {
     await admin()
       .from('sources')
       .update({ last_polled_at: new Date().toISOString() })
