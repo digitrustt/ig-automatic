@@ -27,7 +27,7 @@ const OUT_H = 1920;
  * readable. A band cannot collide with anything, whatever the source looks
  * like, and it doubles as consistent branding across the feed.
  */
-const BAND_H = 440;
+const BAND_H = 500;
 const VIDEO_H = OUT_H - BAND_H;
 const BAND_COLOR = '0x111111';
 
@@ -51,10 +51,27 @@ const MAX_DURATION_SECONDS = 90;
  * is keyed out so the logo sits on the band instead of inside a white slab.
  */
 const LOGO_CROP = '980:412:150:221';
-const LOGO_H = 168;
-const LOGO_TOP = 18;
-/** Breathing room between the sponsor mark and our hook. */
-const LOGO_GAP = 20;
+const LOGO_H = 148;
+
+/**
+ * Instagram lays its own chrome over the top of a reel — the status bar, the
+ * Reels header — and anything in that strip is partly hidden on a phone even
+ * though the exported file looks fine. That is invisible in a rendered frame
+ * and only shows up on a device, which is how the sponsor mark ended up
+ * clipped after being verified as correct.
+ *
+ * So the mark sits at the *bottom* of the band, just above the video: still
+ * the top fifth of the reel, which is what the campaign asks for, but below
+ * anything Instagram draws over it. The hook takes the risky strip instead —
+ * it is ours, and losing a few pixels of it costs a scroll, not a payout.
+ */
+const SAFE_TOP = 140;
+const LOGO_BOTTOM_GAP = 16;
+const LOGO_TOP = BAND_H - LOGO_H - LOGO_BOTTOM_GAP;
+const HOOK_GAP = 22;
+
+/** Distance from the bottom edge to the handle mark's baseline. */
+const HANDLE_BOTTOM = 96;
 
 /**
  * Length of the fade at each end of a clip.
@@ -172,16 +189,20 @@ export async function remix(
       'line_spacing=10',
       'x=(w-text_w)/2',
       // Centred in what the logo leaves, not in the whole band.
-      `y=${LOGO_TOP + LOGO_H + LOGO_GAP}+((${BAND_H}-46)-${LOGO_TOP + LOGO_H + LOGO_GAP}-text_h)/2`,
+      // Between Instagram's chrome and the sponsor mark.
+      `y=${SAFE_TOP}+((${LOGO_TOP - HOOK_GAP})-${SAFE_TOP}-text_h)/2`,
     ].join(':'),
-    // Handle mark, bottom of the band so it never covers the video.
+    // Handle mark, along the bottom edge. The band is the sponsor's now, and
+    // two marks stacked there read as clutter. Down here it sits below the
+    // captions, where a phone's own interface will cover part of it — which is
+    // what a watermark is for: it survives a screen recording, not a glance.
     [
       `drawtext=fontfile='${escapeFilterPath(font)}'`,
       `textfile='${escapeFilterPath(brandFile)}'`,
-      'fontcolor=white@0.5',
+      'fontcolor=white@0.45',
       'fontsize=30',
       'x=(w-text_w)/2',
-      `y=${BAND_H}-46`,
+      `y=${OUT_H}-${HANDLE_BOTTOM}`,
     ].join(':'),
     // Burned-in captions, last so they sit above everything. Spoken-word
     // clips lose most of their audience to muted autoplay without them.
