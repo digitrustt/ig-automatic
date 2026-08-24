@@ -11,6 +11,8 @@ export interface RemixOptions {
   fontPath?: string;
   /** ASS subtitle file to burn in — see lib/media/captions.ts. */
   captionFile?: string;
+  /** Sponsor mark burned into the frame — see sponsorLogo(). */
+  logoPath?: string;
 }
 
 const OUT_W = 1080;
@@ -34,7 +36,18 @@ const BAND_COLOR = '0x111111';
  * Supabase's free tier rejects any file over 50MB. 60s at the bitrate cap
  * below lands around 37MB, which leaves comfortable headroom.
  */
-const MAX_DURATION_SECONDS = 60;
+const MAX_DURATION_SECONDS = 90;
+
+/**
+ * Sponsor logo geometry.
+ *
+ * Clipping campaigns pay for the mark being visible and legible, so it sits in
+ * the video area rather than the band — the band is ours and reads as our
+ * furniture, which is exactly what a viewer's eye learns to skip. Bottom right
+ * clears the captions, which are centred and sit lower.
+ */
+const LOGO_H = 96;
+const LOGO_MARGIN = 44;
 
 /**
  * Length of the fade at each end of a clip.
@@ -46,8 +59,11 @@ const MAX_DURATION_SECONDS = 60;
  */
 const FADE_IN = 0.2;
 const FADE_OUT = 0.3;
-const MAX_VIDEO_BITRATE = '5M';
-const RATE_BUFFER = '10M';
+// Ninety seconds at 5M would land near 56MB, past the storage ceiling below.
+// 4M keeps a minute and a half comfortably inside it, and this material —
+// talking heads from a 720p source — does not miss the difference.
+const MAX_VIDEO_BITRATE = '4M';
+const RATE_BUFFER = '8M';
 
 /** Hard ceiling from the storage tier; we fail before uploading, not during. */
 const MAX_OUTPUT_BYTES = 50 * 1024 * 1024;
@@ -162,29 +178,54 @@ export async function remix(
     // Burned-in captions, last so they sit above everything. Spoken-word
     // clips lose most of their audience to muted autoplay without them.
     opts.captionFile ? `subtitles='${escapeFilterPath(opts.captionFile)}'` : null,
-    // Last, so the whole composed frame fades rather than the video alone
-    // sliding out from under a title that stays put. Skipped on a clip too
-    // short to hold both fades, where they would meet in the middle.
-    ...(fades ? [
-      `fade=t=in:st=0:d=${FADE_IN}`,
-      `fade=t=out:st=${(duration - FADE_OUT).toFixed(2)}:d=${FADE_OUT}`,
-    ] : []),
   ]
     .filter(Boolean)
     .join(',');
 
+  // Applied after any overlay, so the whole composed frame fades rather than
+  // the video sliding out from under marks that stay put. Skipped on a clip
+  // too short to hold both fades, where they would meet in the middle.
+  const fadeChain = fades
+    ? `fade=t=in:st=0:d=${FADE_IN},fade=t=out:st=${(duration - FADE_OUT).toFixed(2)}:d=${FADE_OUT}`
+    : null;
+
   const args = ['-y', '-i', sourcePath];
+  let nextInput = 1;
+
+  const logoInput = opts.logoPath ? nextInput++ : null;
+  if (opts.logoPath) args.push('-i', opts.logoPath);
 
   // Reels with no audio track get throttled, so lay down silence.
+  const silenceInput = info.hasAudio ? null : nextInput++;
   if (!info.hasAudio) {
     args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
   }
 
+  if (logoInput === null) {
+    args.push('-map', '0:v:0');
+  } else {
+    // A second input means the whole chain has to move into filter_complex.
+    // The logo goes on before the fades so it fades with everything else —
+    // a mark that stays lit over black at the end looks like a rendering bug.
+    args.push(
+      '-filter_complex',
+      [
+        `[0:v]${filters}[base]`,
+        `[${logoInput}:v]scale=-1:${LOGO_H}[logo]`,
+        `[base][logo]overlay=W-w-${LOGO_MARGIN}:H-h-${LOGO_MARGIN}` +
+          (fadeChain ? `,${fadeChain}` : '') +
+          '[v]',
+      ].join(';'),
+      '-map', '[v]',
+    );
+  }
+
   args.push(
-    '-map', '0:v:0',
-    '-map', info.hasAudio ? '0:a:0' : '1:a:0',
-    '-vf', filters,
+    '-map', info.hasAudio ? '0:a:0' : `${silenceInput}:a:0`,
     '-t', String(opts.maxDurationSeconds ?? MAX_DURATION_SECONDS),
+    ...(logoInput === null
+      ? ['-vf', fadeChain ? `${filters},${fadeChain}` : filters]
+      : []),
     '-c:v', 'libx264',
     '-profile:v', 'high',
     '-preset', 'medium',

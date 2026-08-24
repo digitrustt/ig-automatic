@@ -12,9 +12,16 @@ export const SegmentSchema = z.object({
 
 export type Segment = z.infer<typeof SegmentSchema>;
 
-/** Reels below this are too thin to land; above it retention falls off. */
-const MIN_SEGMENT_SECONDS = 18;
-const MAX_SEGMENT_SECONDS = 60;
+/**
+ * Clip length bounds.
+ *
+ * Raised from 18–60. A twenty-second clip has room for a punchline and nothing
+ * else, which suits a meme and wastes a conversation — and both platforms now
+ * carry well past a minute. The floor matters more than the ceiling: it is what
+ * stops the model returning a fragment when the moment needed a minute.
+ */
+const MIN_SEGMENT_SECONDS = 30;
+const MAX_SEGMENT_SECONDS = 90;
 
 /** Seconds of transcript per prompt line — enough context, few enough tokens. */
 const LINE_SECONDS = 8;

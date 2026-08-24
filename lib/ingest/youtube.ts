@@ -39,13 +39,13 @@ const MAX_VIDEOS_PER_POLL = 1;
  * handful published — burning the transcription allowance, the storage quota
  * and the CI minutes on work that expires before it airs.
  *
- * Three days deep, deliberately shallow. A clip scheduled a week out was cut
+ * Three days deep at four posts a day, deliberately shallow. A clip scheduled a week out was cut
  * from a video that was current when it was made and will not be when it airs,
  * which matters most on exactly the sources worth having. Shallow also means
  * the queue reflects a recent decision: change a source or a setting and it
  * shows up in days rather than after the backlog drains.
  */
-const MAX_UNPUBLISHED_CLIPS = 24;
+const MAX_UNPUBLISHED_CLIPS = 12;
 
 /**
  * How deep into the ranked archive one poll looks.
