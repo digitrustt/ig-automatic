@@ -22,9 +22,14 @@ export async function dispatch(job: Job): Promise<unknown> {
       if (error) throw error;
 
       const source = data as Source;
-      // YouTube channels take a different route: no scoring, straight to
-      // clipping. See lib/ingest/youtube.ts for why.
-      return source.kind === 'yt_channel' || source.kind === 'yt_channel_top'
+      // Everything from YouTube takes a different route: no scoring, straight
+      // to clipping. See lib/ingest/youtube.ts for why.
+      //
+      // Matched on the prefix rather than listed kind by kind. The list was
+      // the bug: two source kinds were added, wired all the way through
+      // ingest, and then silently failed here for a day because this line was
+      // never updated.
+      return source.kind.startsWith('yt_')
         ? ingestYouTubeChannel(source)
         : ingestSource(source);
     }
