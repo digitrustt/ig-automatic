@@ -132,10 +132,11 @@ export async function ingestYouTubeChannel(
 ): Promise<YouTubeIngestResult> {
   const backlog = await backlogSize(source.niche);
   if (backlog >= brakeFor(source)) {
-    await admin()
-      .from('sources')
-      .update({ last_polled_at: new Date().toISOString() })
-      .eq('id', source.id);
+    // Deliberately does not stamp last_polled_at. Nothing was read, so there
+    // is nothing to record — and stamping made a blocked source wait out its
+    // whole interval before trying again, which on a daily source cost it a
+    // day every time the queue happened to be full. The check above is one
+    // count query and runs before any listing, so retrying costs nothing.
     return {
       source: `yt_channel:${source.handle}`,
       fetched: 0,
