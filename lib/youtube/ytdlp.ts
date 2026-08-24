@@ -85,12 +85,29 @@ export async function listPlaylistVideos(
 /**
  * Reads one video's metadata.
  *
- * The URL is rebuilt from the id rather than used as pasted: a YouTube link
- * copied from the app carries the playlist it was playing inside, and yt-dlp
+ * Does not go through the listing path, and cannot. A channel or playlist page
+ * is public metadata that yt-dlp reads flat and unauthenticated, but resolving
+ * a single video is a full extraction: YouTube serves it the bot gate and the
+ * JavaScript challenge, exactly as it does a download. So this needs the
+ * session and the solver, and must not be flattened — measured against a live
+ * video, every other combination fails, each with a different error.
+ *
+ * The URL is rebuilt from the id rather than used as pasted: a link copied
+ * from the YouTube app carries the playlist it was playing inside, and yt-dlp
  * would happily walk all of it.
  */
 export async function describeVideo(videoId: string): Promise<ChannelVideo | null> {
-  const [video] = await listUrl(`https://www.youtube.com/watch?v=${videoId}`, 1);
+  const stdout = await run(ytdlpPath(), [
+    ...cookies(),
+    ...challengeSolver(),
+    ...preferredLanguage(),
+    '--skip-download',
+    '--print', '%(.{id,title,duration,view_count,upload_date,timestamp})j',
+    '--no-warnings',
+    `https://www.youtube.com/watch?v=${videoId}`,
+  ]);
+
+  const [video] = parseEntries(stdout);
   return video ?? null;
 }
 
@@ -137,6 +154,10 @@ async function listUrl(url: string, limit: number): Promise<ChannelVideo[]> {
     url,
   ]);
 
+  return parseEntries(stdout);
+}
+
+function parseEntries(stdout: string): ChannelVideo[] {
   return stdout
     .split('\n')
     .map((line) => line.trim())
